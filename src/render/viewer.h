@@ -15,6 +15,8 @@ namespace pm {
 struct RenderFrame {
   Vec3 com;
   bool drawCom = true;
+  bool drawSupport = false;
+  Vec3 support;
   bool drawColliders = false;
   bool drawJointAxes = false;
 };
@@ -38,6 +40,7 @@ class Viewer {
   void addSphere(Vec3 center, double radius, const float rgba[4]);
   void addGrid();
   void addComMarker(Vec3 com);
+  void addSupportMarker(Vec3 support);
   void addJointAxes(const mjData* data);
 
   GLFWwindow* window_ = nullptr;

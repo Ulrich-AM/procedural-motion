@@ -4,9 +4,17 @@ Experimental fully procedural 3D humanoid motion. The long-term aim is walking, 
 
 **This project does not play animation.** The Y-Bot FBX is only a source of skeleton hierarchy and rest-pose proportions. No clips, keyframes, mocap, or pose playback are loaded into the simulator.
 
+## Phase 1 — Active standing
+
+Phase 1 keeps the Phase 0 ragdoll and adds a standing controller that acts only through limited hinge torques. The pelvis stays a free body. Nothing writes its position, orientation, or velocity during a step.
+
+Active Control starts off. With it off, the humanoid is the Phase 0 ragdoll and collapses under gravity. With it on, a torque-limited PD holds a rest pose with a small knee bend, and an ankle/hip term nudges the center of mass back toward the feet.
+
+There is no walk, step, gait, crouch, jump, hit reaction, reinforcement learning, mocap, or authored stand pose. If a push is large enough, the character falls. That fall is the intended failure.
+
 ## Phase 0
 
-Phase 0 is a physical humanoid lab, not locomotion. It builds:
+Phase 0 is the physical lab this controller sits on:
 
 - a Windows CMake project
 - a flat test floor with a square grid
@@ -14,10 +22,63 @@ Phase 0 is a physical humanoid lab, not locomotion. It builds:
 - a MuJoCo ragdoll with a free pelvis
 - primitive joint spheres and bone capsules
 - pause, single-step, reset, and a small debug panel
+- fixed 120 Hz physics, Y-Bot proportions, joint limits, contacts, and a center-of-mass marker
 
-With gravity on and no controllers, the body falls and collapses. Nothing holds it upright.
+With gravity on and Active Control off, the body falls and collapses. Nothing holds it upright.
 
-Not in this phase: standing, walking, IK, balance, gait, hit reactions, reinforcement learning, or animation playback.
+## How standing works
+
+`StandingController` reads `BodyState` and writes hinge torques. It does not touch rendering, and the viewer does not know the control law.
+
+Each hinge uses
+
+```text
+torque = Kp * (target - angle) - Kd * angularVelocity
+```
+
+clamped to a per-joint limit. The target is the reset angle, except the knees, which bend about 10 degrees toward the flexion side of their joint range. The arms stay in the imported T-pose and use much smaller gains than the legs.
+
+When a foot is on the floor, a capture-point term adds ankle and hip torque from the horizontal offset between the support center and the whole-body center of mass, plus the horizontal center-of-mass velocity. The support center is the midpoint of the force-weighted contact centers of the feet that are down. Spine and neck hinges add a smaller upright term. No torque is applied to the free root.
+
+Gains and limits live in `StandingController::tuneFor`:
+
+| Joints | Kp (Nm/rad) | Kd (Nm·s/rad) | Limit (Nm) |
+| --- | --- | --- | --- |
+| Ankle pitch and roll | 45 | 6 | 45 |
+| Hip abduction | 650 | 50 | 120 |
+| Hip flexion | 300 | 24 | 100 |
+| Hip twist | 80 | 8 | 30 |
+| Knee | 420 | 36 | 110 |
+| Spine | 80 | 8 | 40 |
+| Neck | 20 | 2 | 12 |
+| Shoulder | 55 | 6 | 28 |
+| Elbow | 24 | 2.2 | 14 |
+| Wrist | 6 | 0.6 | 5 |
+
+Hip and knee hinges also have extra viscous damping in the MuJoCo model (8 and 6) so the landing does not whip those joints. The passive fall still reaches the floor.
+
+The controller clears its torques every step and writes them into MuJoCo's generalized applied force. There are no motor actuators (`nu` stays 0). A chest push is a separate Cartesian force on the chest, not a joint torque and not a root teleport.
+
+## Controls
+
+| Input | Action |
+| --- | --- |
+| Left mouse | Orbit |
+| Right mouse | Pan |
+| Wheel | Zoom |
+| R | Reset the humanoid and clear velocities |
+| Space | Pause / resume |
+| N | One physics step while paused |
+| G | Gravity on / off |
+| C | Collision shape debug view |
+| J | Joint axis debug view |
+| A | Active standing on / off |
+| P | Push the chest forward, 40 N for 0.12 s |
+| Home | Reset the camera |
+
+The same Active Control switch and Push button are in the debug panel. The panel also shows balance (Stable / Unstable / No Support), horizontal COM error and speed, which feet are down, and the peak controller torque. A gray marker on the floor is the support center while a foot is down. The existing COM marker stays.
+
+The camera orbits a fixed point near the pelvis and chest. It does not follow the ragdoll.
 
 ## Dependencies
 
@@ -61,6 +122,8 @@ Physics check without a window:
 build\Release\procedural_motion.exe --self-test
 ```
 
+The self-test runs the Phase 0 passive fall first, then the active stand. Active Control must keep the pelvis upright for the last 4 seconds of a 10 second run, with both feet on the floor and the center of mass near the support center. It then applies the same 40 N chest push and checks that the body moves and falls. Root generalized force from the controller must stay zero, and every hinge torque must stay inside its limit.
+
 Or, after a build:
 
 ```bat
@@ -75,23 +138,6 @@ The first configure downloads MuJoCo and the source of the other libraries. The 
 - `assets/generated/hierarchy.txt` — full source node tree
 - `assets/generated/skeleton_mapping.md` — source bone to canonical bone
 - `humanoid.xml` beside the loaded JSON, written when the lab starts
-
-## Controls
-
-| Input | Action |
-| --- | --- |
-| Left mouse | Orbit |
-| Right mouse | Pan |
-| Wheel | Zoom |
-| R | Reset the humanoid and clear velocities |
-| Space | Pause / resume |
-| N | One physics step while paused |
-| G | Gravity on / off |
-| C | Collision shape debug view |
-| J | Joint axis debug view |
-| Home | Reset the camera |
-
-The camera orbits a fixed point near the pelvis and chest. It does not follow the ragdoll.
 
 Developer flags:
 
@@ -115,13 +161,14 @@ procedural-motion/
   config/lab.json            timestep, gravity, spawn clearance
   src/main.cpp
   src/app/                   window, input, fixed timestep, debug UI
+  src/control/               standing controller
   src/skeleton/              canonical bone list and JSON loader
-  src/physics/               MuJoCo bodies, joints, state queries
+  src/physics/               MuJoCo bodies, joints, state queries, hinge torques
   src/render/                orbit camera, primitive view, floor grid
   tools/fbx_skeleton_import/ Assimp converter, not linked into the lab
 ```
 
-The four pieces stay separate: skeleton description, physical bodies, rendering, and app control. Later controllers can sit beside them. They are not implemented yet.
+Skeleton description, physical bodies, the standing controller, rendering, and app control stay separate.
 
 ## FBX import
 
@@ -170,15 +217,16 @@ The measured source names and positions are written to `assets/generated/skeleto
 
 ## Limitations
 
-- No muscles, motors, or pose springs. The ragdoll only falls.
+- The quiet stand is real, and it is narrow. The foot capsules meet the floor near the toe, and the ankles settle against the dorsiflexion stop. A chest push of a few tens of newtons moves the body and knocks it over. There is no recovery step in this phase, and the current ankle travel cannot yet bring the center of mass back after that push.
+- Stepping and locomotion are intentionally absent.
 - Joint limits are simple hinges, not anatomical joint surfaces.
 - Clavicles are not rigid bodies.
 - Masses, radii, and ranges are approximate.
 - Feet are capsules on a flat infinite plane.
-- Some nearby body pairs do not collide, so the collapse stays stable.
-- The center-of-mass marker is diagnostic. A vertical tick marks its ground projection. Nothing balances around it.
+- Some nearby body pairs do not collide, so a collapse stays stable.
+- The center-of-mass marker and the support marker are diagnostic.
 - Windows is the supported build. The UI uses Arial when `C:\Windows\Fonts\arial.ttf` is present.
 
 ## Next phase
 
-Phase 1 should add a joint-torque interface and a standing experiment: hold a rest pose and recover small pushes using contact forces and the center of mass, still with no animation clips. Do not start gait until a passive fall and a controlled stand are both reliable.
+Phase 2 should add a recovery step when the center of mass leaves the feet, still without a gait cycle or an authored clip. A flatter foot contact, so the ankle can move the center of pressure before it hits the joint stop, is the main thing that quiet standing does not yet have.

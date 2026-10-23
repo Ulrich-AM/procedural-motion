@@ -139,6 +139,11 @@ void Viewer::addComMarker(Vec3 com) {
   if (com.z > 0.03) addCapsule({com.x, com.y, 0.012}, com, 0.006, pole);
 }
 
+void Viewer::addSupportMarker(Vec3 support) {
+  const float marker[4] = {0.28f, 0.28f, 0.28f, 1.f};
+  addSphere({support.x, support.y, 0.014}, 0.028, marker);
+}
+
 void Viewer::addJointAxes(const mjData* data) {
   if (!model_ || !data) return;
   for (int joint = 0; joint < model_->njnt; ++joint) {
@@ -181,6 +186,7 @@ void Viewer::render(mjData* data, const RenderFrame& frame) {
   }
   addGrid();
   if (frame.drawCom) addComMarker(frame.com);
+  if (frame.drawSupport) addSupportMarker(frame.support);
   if (frame.drawJointAxes) addJointAxes(data);
 
   mjrRect viewport{0, 0, width, height};

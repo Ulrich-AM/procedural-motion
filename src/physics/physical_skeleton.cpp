@@ -427,10 +427,10 @@ class ModelBuilder {
     addHinge("right_hand", "right_wrist_flex", rightElbowAxis, -60, 60, 0.25);
     addHinge("right_hand", "right_wrist_yaw",
              wristDeviationAxis(rightElbowAxis, at("right_lower_arm"), at("right_hand")), -35, 35, 0.25);
-    addTriaxial("left_upper_leg", "left_hip", 105, 55, 45, 2.0);
-    addTriaxial("right_upper_leg", "right_hip", 105, 55, 45, 2.0);
-    addLimbHinge("left_lower_leg", "left_knee", right_, at("left_lower_leg"), at("left_foot"), true, 1.2);
-    addLimbHinge("right_lower_leg", "right_knee", right_, at("right_lower_leg"), at("right_foot"), true, 1.2);
+    addTriaxial("left_upper_leg", "left_hip", 105, 55, 45, 8.0);
+    addTriaxial("right_upper_leg", "right_hip", 105, 55, 45, 8.0);
+    addLimbHinge("left_lower_leg", "left_knee", right_, at("left_lower_leg"), at("left_foot"), true, 6.0);
+    addLimbHinge("right_lower_leg", "right_knee", right_, at("right_lower_leg"), at("right_foot"), true, 6.0);
     addHinge("left_foot", "left_ankle_pitch", right_, -40, 40, 0.6);
     addHinge("left_foot", "left_ankle_roll", forward_, -25, 25, 0.6);
     addHinge("right_foot", "right_ankle_pitch", right_, -40, 40, 0.6);
@@ -668,19 +668,107 @@ bool PhysicalSkeleton::load(const SkeletonDefinition& skeleton, const SimConfig&
   std::cout << "Total mass: " << mj_getTotalmass(model_) << " kg\n";
   std::cout << "Degrees of freedom: " << model_->nv << "\n";
   std::cout << "Wrote " << xmlPath.string() << "\n";
+  indexHinges();
+  return true;
+}
+
+void PhysicalSkeleton::indexHinges() {
+  hinges_.clear();
+  rootDof_ = 0;
+  if (!model_) return;
+  const int root = mj_name2id(model_, mjOBJ_JOINT, "root");
+  if (root >= 0) rootDof_ = model_->jnt_dofadr[root];
+  for (int j = 0; j < model_->njnt; ++j) {
+    if (model_->jnt_type[j] != mjJNT_HINGE) continue;
+    const int dof = model_->jnt_dofadr[j];
+    if (dof < rootDof_ + 6 || dof >= model_->nv) continue;
+    const char* name = mj_id2name(model_, mjOBJ_JOINT, j);
+    if (!name || name[0] == '\0') continue;
+    HingeSlot slot;
+    slot.dof = dof;
+    hinges_.emplace(name, slot);
+  }
+}
+
+void PhysicalSkeleton::clearJointTorques() {
+  for (auto& entry : hinges_) entry.second.command = 0;
+}
+
+bool PhysicalSkeleton::setJointTorque(const std::string& name, double torque, double absoluteLimit) {
+  if (name.empty() || name == "root") return false;
+  if (!std::isfinite(torque) || !std::isfinite(absoluteLimit) || absoluteLimit <= 0) return false;
+  const auto found = hinges_.find(name);
+  if (found == hinges_.end()) return false;
+  const double limit = absoluteLimit;
+  found->second.command = std::clamp(torque, -limit, limit);
+  return true;
+}
+
+double PhysicalSkeleton::appliedJointTorque(const std::string& name) const {
+  const auto found = hinges_.find(name);
+  if (found == hinges_.end()) return 0;
+  return found->second.applied;
+}
+
+bool PhysicalSkeleton::startBodyForcePulse(const std::string& bodyName, Vec3 force, double durationSeconds) {
+  if (!model_ || !std::isfinite(durationSeconds) || durationSeconds <= 0) return false;
+  if (!std::isfinite(force.x) || !std::isfinite(force.y) || !std::isfinite(force.z)) return false;
+  const int body = mj_name2id(model_, mjOBJ_BODY, bodyName.c_str());
+  if (body <= 0) return false;
+  pulseBody_ = body;
+  pulseForce_ = force;
+  pulseRemaining_ = durationSeconds;
+  pulseActive_ = true;
   return true;
 }
 
 void PhysicalSkeleton::reset() {
   if (!model_ || !data_) return;
   mj_resetData(model_, data_);
+  clearJointTorques();
+  for (auto& entry : hinges_) entry.second.applied = 0;
+  lastPeakTorque_ = 0;
+  lastRootApplied_ = 0;
+  pulseActive_ = false;
+  pulseRemaining_ = 0;
+  if (data_->qfrc_applied) mju_zero(data_->qfrc_applied, model_->nv);
+  if (data_->xfrc_applied) mju_zero(data_->xfrc_applied, 6 * model_->nbody);
   if (!gravityEnabled_) model_->opt.gravity[2] = 0;
   mj_forward(model_, data_);
 }
 
 void PhysicalSkeleton::step() {
   if (!model_ || !data_) return;
+  mju_zero(data_->qfrc_applied, model_->nv);
+  lastPeakTorque_ = 0;
+  lastRootApplied_ = 0;
+  for (auto& entry : hinges_) {
+    HingeSlot& slot = entry.second;
+    data_->qfrc_applied[slot.dof] = slot.command;
+    slot.applied = slot.command;
+    lastPeakTorque_ = std::max(lastPeakTorque_, std::abs(slot.command));
+    slot.command = 0;
+  }
+  for (int i = 0; i < 6; ++i) {
+    const int dof = rootDof_ + i;
+    if (dof >= 0 && dof < model_->nv) {
+      lastRootApplied_ = std::max(lastRootApplied_, std::abs(data_->qfrc_applied[dof]));
+    }
+  }
+
+  mju_zero(data_->xfrc_applied, 6 * model_->nbody);
+  if (pulseActive_ && pulseBody_ > 0 && pulseBody_ < model_->nbody) {
+    mjtNum* wrench = data_->xfrc_applied + 6 * pulseBody_;
+    wrench[3] = pulseForce_.x;
+    wrench[4] = pulseForce_.y;
+    wrench[5] = pulseForce_.z;
+    pulseRemaining_ -= model_->opt.timestep;
+    if (pulseRemaining_ <= 0) pulseActive_ = false;
+  }
+
   mj_step(model_, data_);
+  mju_zero(data_->qfrc_applied, model_->nv);
+  mju_zero(data_->xfrc_applied, 6 * model_->nbody);
 }
 
 void PhysicalSkeleton::setGravityEnabled(bool enabled) {
@@ -732,8 +820,10 @@ BodyState PhysicalSkeleton::sample() {
     joint.name = name ? name : "";
     joint.type = jointTypeName(model_->jnt_type[j]);
     const int address = model_->jnt_qposadr[j];
+    const int dof = model_->jnt_dofadr[j];
     if (model_->jnt_type[j] == mjJNT_HINGE || model_->jnt_type[j] == mjJNT_SLIDE) {
       joint.angle = data_->qpos[address];
+      if (dof >= 0 && dof < model_->nv) joint.velocity = data_->qvel[dof];
     }
     if (model_->jnt_limited[j]) {
       joint.rangeMin = model_->jnt_range[2 * j];

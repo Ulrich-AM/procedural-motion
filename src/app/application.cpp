@@ -173,6 +173,7 @@ bool Application::loadAssets(std::string& error) {
     error = physics_.error();
     return false;
   }
+  controller_.capture(skeleton_, physics_.sample());
   return true;
 }
 
@@ -235,7 +236,7 @@ bool Application::openWindow(std::string& error) {
   else if (havePelvis) look = pelvis;
   viewer_.setInitialTarget(look);
 
-  std::cout << "Controls: R reset, Space pause, N step, G gravity, C colliders, J axes, Home reset view\n";
+  std::cout << "Controls: R reset, Space pause, N step, A active stand, P push, G gravity, C colliders, J axes, Home reset view\n";
   std::cout << "Mouse: left orbit, right pan, wheel zoom\n";
   return true;
 }
@@ -269,7 +270,7 @@ void Application::drawUi(const BodyState& state) {
                                  ImGuiWindowFlags_NoCollapse;
   ImGui::Begin("lab", nullptr, flags);
   ImGui::TextUnformatted("PROCEDURAL MOTION LAB");
-  ImGui::TextUnformatted("Phase: 0 - Physical Humanoid");
+  ImGui::TextUnformatted("Phase: 1 - Active Standing");
   ImGui::Text("Simulation: %s", paused_ ? "Paused" : "Running");
   ImGui::Text("Time: %.2f s", state.time);
   ImGui::Separator();
@@ -297,8 +298,25 @@ void Application::drawUi(const BodyState& state) {
   }
   ImGui::SameLine();
   ImGui::TextUnformatted(drawAxes_ ? "On" : "Off");
+  if (ImGui::Checkbox("Active Control", &active_)) {
+    if (active_) controller_.resetFilters();
+    else physics_.clearJointTorques();
+  }
+  ImGui::SameLine();
+  ImGui::TextUnformatted(active_ ? "On" : "Off");
+  ImGui::SameLine();
+  if (ImGui::Button("Push")) requestPush();
+  ImGui::Separator();
+  ImGui::Text("Active Control: %s", active_ ? "On" : "Off");
+  ImGui::Text("Balance: %s", active_ ? balanceLabel(report_.balance) : "Off");
+  ImGui::Text("COM Error X/Y: %.3f  %.3f", report_.comErrorX, report_.comErrorY);
+  ImGui::Text("COM Speed X/Y: %.3f  %.3f", report_.comSpeedX, report_.comSpeedY);
+  ImGui::Text("Left Foot: %s", report_.leftFootContact ? "Contact" : "Air");
+  ImGui::Text("Right Foot: %s", report_.rightFootContact ? "Contact" : "Air");
+  ImGui::Text("Peak Controller Torque: %.1f Nm", active_ ? report_.peakTorque : 0.0);
   ImGui::Separator();
   ImGui::TextUnformatted("R reset   Space pause   N step");
+  ImGui::TextUnformatted("A active   P push");
   ImGui::TextUnformatted("G gravity   C colliders   J axes");
   ImGui::TextUnformatted("Home reset view");
   ImGui::TextUnformatted("Mouse: orbit, right-pan, wheel zoom");
@@ -307,9 +325,14 @@ void Application::drawUi(const BodyState& state) {
 
 void Application::drawFrame() {
   const BodyState state = physics_.sample();
+  report_ = controller_.diagnose(state);
+  report_.active = active_;
+  report_.peakTorque = active_ ? controller_.peakTorque() : 0;
   RenderFrame frame;
   frame.com = state.centerOfMass;
   frame.drawCom = true;
+  frame.drawSupport = report_.supportValid;
+  frame.support = report_.supportCenter;
   frame.drawColliders = drawColliders_;
   frame.drawJointAxes = drawAxes_;
   viewer_.render(physics_.data(), frame);
@@ -338,14 +361,14 @@ int Application::runLoop(double maxSeconds) {
       accumulator_ += frame;
       int steps = 0;
       while (accumulator_ >= config_.timestep && steps < config_.maxSubsteps) {
-        physics_.step();
+        stepPhysics();
         accumulator_ -= config_.timestep;
         ++steps;
       }
     } else {
       accumulator_ = 0;
       if (singleStep_) {
-        physics_.step();
+        stepPhysics();
         singleStep_ = false;
       }
     }
@@ -417,6 +440,18 @@ int Application::runSelfTest() {
   const double timeStep = model->opt.timestep;
   physics_.step();
   if (std::abs(data->time - timeStep) > 1e-8) return fail("single step did not advance one timestep");
+  {
+    const BodyState stepped = physics_.sample();
+    const int knee = mj_name2id(model, mjOBJ_JOINT, "left_knee");
+    if (knee < 0) return fail("left_knee missing");
+    const int dof = model->jnt_dofadr[knee];
+    const JointState* kneeState = nullptr;
+    for (const JointState& joint : stepped.joints) {
+      if (joint.name == "left_knee") kneeState = &joint;
+    }
+    if (!kneeState) return fail("left_knee missing from state");
+    if (std::abs(kneeState->velocity - data->qvel[dof]) > 1e-8) return fail("hinge velocity was not copied");
+  }
   physics_.reset();
   if (std::abs(data->time) > 1e-12) return fail("reset did not clear time");
   for (int i = 0; i < model->nq; ++i) {
@@ -480,12 +515,155 @@ int Application::runSelfTest() {
   for (int i = 0; i < model->nv; ++i) {
     if (std::abs(data->qvel[i]) > 1e-10) return fail("final reset velocity mismatch");
   }
+  std::cout << "PASSIVE CHECKS PASSED\n";
+  return runActiveChecks();
+}
+
+int Application::runActiveChecks() {
+  mjModel* model = physics_.model();
+  mjData* data = physics_.data();
+  auto fail = [](const std::string& message) {
+    std::cerr << "ACTIVE SELF-TEST FAIL: " << message << "\n";
+    return 1;
+  };
+  auto bodyOf = [](const BodyState& state, const char* name) -> const BodyKinematics* {
+    for (const BodyKinematics& body : state.bodies) {
+      if (body.name == name) return &body;
+    }
+    return nullptr;
+  };
+  auto axisOf = [](const BodyKinematics& body, Vec3 local) {
+    const double* rotation = body.rotation;
+    return Vec3{rotation[0] * local.x + rotation[1] * local.y + rotation[2] * local.z,
+                rotation[3] * local.x + rotation[4] * local.y + rotation[5] * local.z,
+                rotation[6] * local.x + rotation[7] * local.y + rotation[8] * local.z};
+  };
+  auto forwardOf = [&](const BodyState& state) {
+    const BodyKinematics* pelvis = bodyOf(state, "pelvis");
+    Vec3 forward = pelvis ? axisOf(*pelvis, skeleton_.forward) : skeleton_.forward;
+    forward.z = 0;
+    forward = normalize(forward);
+    if (length(forward) < 0.5) forward = normalize(skeleton_.forward);
+    return forward;
+  };
+  auto upright = [&](const BodyState& state, double& pelvisZ, double& upZ) {
+    const BodyKinematics* pelvis = bodyOf(state, "pelvis");
+    if (!pelvis) return false;
+    pelvisZ = pelvis->position.z;
+    upZ = axisOf(*pelvis, skeleton_.up).z;
+    return true;
+  };
+
+  if (model->nu != 0) return fail("model has actuators");
+  physics_.reset();
+  controller_.capture(skeleton_, physics_.sample());
+  if (physics_.setJointTorque("root", 20, 20)) return fail("root accepted a torque");
+  if (physics_.setJointTorque("not_a_joint", 1, 10)) return fail("unknown joint accepted a torque");
+  if (!physics_.setJointTorque("left_knee", 10000, 40)) return fail("left_knee torque was rejected");
+  physics_.step();
+  if (std::abs(physics_.appliedJointTorque("left_knee") - 40.0) > 1e-6) return fail("torque was not clamped");
+  if (physics_.lastRootAppliedForce() > 1e-8) return fail("root received generalized force");
+  physics_.reset();
+  controller_.capture(skeleton_, physics_.sample());
+
+  const double dt = model->opt.timestep;
+  auto controlledStep = [&]() {
+    controller_.update(physics_.sample(), physics_);
+    physics_.step();
+    return physics_.lastRootAppliedForce() <= 1e-8 && std::isfinite(physics_.lastPeakJointTorque()) &&
+           physics_.lastPeakJointTorque() <= 120.01 && finiteArray(data->qpos, model->nq) &&
+           finiteArray(data->qvel, model->nv);
+  };
+
+  const int standSteps = std::max(1, static_cast<int>(std::lround(10.0 / dt)));
+  int window = 0;
+  int uprightCount = 0;
+  int leftCount = 0;
+  int rightCount = 0;
+  double errorSum = 0;
+  for (int step = 1; step <= standSteps; ++step) {
+    if (!controlledStep()) return fail("controlled step wrote root force, exceeded a torque limit, or went non-finite");
+    if (model->nu != 0) return fail("controller added actuators");
+    if (data->time < 6.0) continue;
+    const BodyState state = physics_.sample();
+    double pelvisZ = 0;
+    double upZ = 0;
+    if (!upright(state, pelvisZ, upZ)) return fail("pelvis missing during stand");
+    const StandingReport report = controller_.diagnose(state);
+    ++window;
+    if (pelvisZ > 0.70 && upZ > 0.85) ++uprightCount;
+    if (report.leftFootContact) ++leftCount;
+    if (report.rightFootContact) ++rightCount;
+    if (report.supportValid) errorSum += std::hypot(report.comErrorX, report.comErrorY);
+  }
+  if (window < 10) return fail("standing window was empty");
+  const double uprightRatio = static_cast<double>(uprightCount) / static_cast<double>(window);
+  const double meanError = errorSum / static_cast<double>(window);
+  std::cout << "Stand window upright " << uprightRatio << ", mean COM error " << meanError << " m, foot samples "
+            << leftCount << "/" << rightCount << " of " << window << "\n";
+  if (uprightRatio < 0.9) return fail("humanoid did not stay upright for the last 4 seconds");
+  if (leftCount < window / 2 || rightCount < window / 2) return fail("feet were not on the floor");
+  if (meanError > 0.12) return fail("COM stayed far from the support center");
+
+  const BodyState beforePush = physics_.sample();
+  const BodyKinematics* pelvisBefore = bodyOf(beforePush, "pelvis");
+  if (!pelvisBefore) return fail("missing body before the push");
+  // 40 N for 0.12 s is enough to leave the narrow braced stance. The ankles are
+  // already on the dorsiflexion stop, so this push is a knockdown, not a recovery.
+  if (!physics_.startBodyForcePulse("chest", forwardOf(beforePush) * 40.0, 0.12)) return fail("push was rejected");
+  double peakShift = 0;
+  bool fell = false;
+  const int fallSteps = std::max(1, static_cast<int>(std::lround(3.0 / dt)));
+  for (int step = 0; step < fallSteps; ++step) {
+    if (!controlledStep()) return fail("push made the simulation non-finite or wrote root force");
+    const BodyKinematics* pelvis = bodyOf(physics_.sample(), "pelvis");
+    if (!pelvis) return fail("pelvis missing during the push");
+    peakShift = std::max(peakShift, std::hypot(pelvis->position.x - pelvisBefore->position.x,
+                                               pelvis->position.y - pelvisBefore->position.y));
+    double fallenZ = 0;
+    double fallenUp = 0;
+    upright(physics_.sample(), fallenZ, fallenUp);
+    if (fallenUp < 0.45 || fallenZ < 0.55) fell = true;
+  }
+  std::cout << "Push peak pelvis shift " << peakShift << " m, fell=" << (fell ? "yes" : "no") << "\n";
+  if (peakShift < 0.012) return fail("push did not move the body");
+  if (!fell) return fail("push did not knock the humanoid over");
+  std::cout << "ACTIVE CHECKS PASSED\n";
   std::cout << "SELF-TEST PASS\n";
   return 0;
 }
 
+void Application::stepPhysics() {
+  if (active_) {
+    report_ = controller_.update(physics_.sample(), physics_);
+  } else {
+    physics_.clearJointTorques();
+    report_ = controller_.diagnose(physics_.sample());
+  }
+  physics_.step();
+}
+
+void Application::requestPush() {
+  const BodyState state = physics_.sample();
+  Vec3 forward = skeleton_.forward;
+  for (const BodyKinematics& body : state.bodies) {
+    if (body.name != "pelvis") continue;
+    const double* rotation = body.rotation;
+    forward = {rotation[0] * skeleton_.forward.x + rotation[1] * skeleton_.forward.y + rotation[2] * skeleton_.forward.z,
+               rotation[3] * skeleton_.forward.x + rotation[4] * skeleton_.forward.y + rotation[5] * skeleton_.forward.z,
+               0};
+    break;
+  }
+  forward.z = 0;
+  forward = normalize(forward);
+  if (length(forward) < 0.5) forward = normalize(skeleton_.forward);
+  // Brief and weak. A harder shove is still able to knock the body over.
+  physics_.startBodyForcePulse("chest", forward * 40.0, 0.12);
+}
+
 void Application::resetSimulation() {
   physics_.reset();
+  controller_.capture(skeleton_, physics_.sample());
   accumulator_ = 0;
 }
 
@@ -547,6 +725,12 @@ void Application::onKey(GLFWwindow* window, int key, int, int action, int) {
   if (key == GLFW_KEY_C && action == GLFW_PRESS) app->drawColliders_ = !app->drawColliders_;
   if (key == GLFW_KEY_J && action == GLFW_PRESS) app->drawAxes_ = !app->drawAxes_;
   if (key == GLFW_KEY_HOME && action == GLFW_PRESS) app->viewer_.resetCamera();
+  if (key == GLFW_KEY_A && action == GLFW_PRESS) {
+    app->active_ = !app->active_;
+    if (app->active_) app->controller_.resetFilters();
+    else app->physics_.clearJointTorques();
+  }
+  if (key == GLFW_KEY_P && action == GLFW_PRESS) app->requestPush();
 }
 
 }  // namespace pm

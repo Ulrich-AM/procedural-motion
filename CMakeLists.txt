@@ -164,6 +164,7 @@ add_executable(procedural_motion
   src/app/application.cpp
   src/app/sim_config.cpp
   src/physics/physical_skeleton.cpp
+  src/control/standing_controller.cpp
   src/render/viewer.cpp
   src/skeleton/skeleton_definition.cpp)
 add_dependencies(procedural_motion generate_skeleton)

@@ -18,12 +18,13 @@ struct BodyKinematics {
   Vec3 angularVelocity;
 };
 
-// One MuJoCo joint. Hinge angle is in radians. Free joints leave angle at 0;
-// the root pose lives on the pelvis body instead.
+// One MuJoCo joint. Hinge angle and velocity are in radians. Free joints leave
+// both at 0; the root pose lives on the pelvis body instead.
 struct JointState {
   std::string name;
   std::string type;
   double angle = 0;
+  double velocity = 0;
   double rangeMin = 0;
   double rangeMax = 0;
   Vec3 anchor;
@@ -38,8 +39,7 @@ struct ContactState {
   std::string geom2;
 };
 
-// Read-only snapshot for later balance, contact, and gait work.
-// Phase 0 only displays it. Nothing corrects the pose from this data.
+// Read-only snapshot. Controllers may read it. They do not write it back.
 struct BodyState {
   double time = 0;
   Vec3 centerOfMass;
