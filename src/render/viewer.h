@@ -17,6 +17,12 @@ struct RenderFrame {
   bool drawCom = true;
   bool drawSupport = false;
   Vec3 support;
+  bool drawCapture = false;
+  Vec3 capture;
+  bool drawLanding = false;
+  Vec3 landing;
+  Vec3 swingPath[8]{};
+  int swingPathCount = 0;
   bool drawColliders = false;
   bool drawJointAxes = false;
 };
@@ -41,6 +47,9 @@ class Viewer {
   void addGrid();
   void addComMarker(Vec3 com);
   void addSupportMarker(Vec3 support);
+  void addCross(Vec3 point, const float rgba[4]);
+  void addRing(Vec3 point, const float rgba[4]);
+  void addPath(const Vec3* points, int count, const float rgba[4]);
   void addJointAxes(const mjData* data);
 
   GLFWwindow* window_ = nullptr;

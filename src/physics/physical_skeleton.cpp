@@ -38,8 +38,11 @@ struct Primitive {
   std::string name;
   Vec3 a;
   Vec3 b;
+  Vec3 half{0.05, 0.05, 0.05};
+  double quat[4]{1, 0, 0, 0};
   double radius = 0.05;
   bool sphere = false;
+  bool box = false;
   bool collision = false;
   double density = 0;
   std::string rgba = "0.75 0.75 0.75 1";
@@ -60,6 +63,40 @@ double capsuleVolume(double length, double radius) {
 }
 
 double sphereVolume(double radius) { return (4.0 / 3.0) * kPi * radius * radius * radius; }
+
+double boxVolume(Vec3 half) { return 8.0 * half.x * half.y * half.z; }
+
+void matToQuat(Vec3 x, Vec3 y, Vec3 z, double q[4]) {
+  const double m00 = x.x, m01 = y.x, m02 = z.x;
+  const double m10 = x.y, m11 = y.y, m12 = z.y;
+  const double m20 = x.z, m21 = y.z, m22 = z.z;
+  const double trace = m00 + m11 + m22;
+  if (trace > 0) {
+    const double s = std::sqrt(trace + 1.0) * 2.0;
+    q[0] = 0.25 * s;
+    q[1] = (m21 - m12) / s;
+    q[2] = (m02 - m20) / s;
+    q[3] = (m10 - m01) / s;
+  } else if (m00 > m11 && m00 > m22) {
+    const double s = std::sqrt(1.0 + m00 - m11 - m22) * 2.0;
+    q[0] = (m21 - m12) / s;
+    q[1] = 0.25 * s;
+    q[2] = (m01 + m10) / s;
+    q[3] = (m02 + m20) / s;
+  } else if (m11 > m22) {
+    const double s = std::sqrt(1.0 + m11 - m00 - m22) * 2.0;
+    q[0] = (m02 - m20) / s;
+    q[1] = (m01 + m10) / s;
+    q[2] = 0.25 * s;
+    q[3] = (m12 + m21) / s;
+  } else {
+    const double s = std::sqrt(1.0 + m22 - m00 - m11) * 2.0;
+    q[0] = (m10 - m01) / s;
+    q[1] = (m02 + m20) / s;
+    q[2] = (m12 + m21) / s;
+    q[3] = 0.25 * s;
+  }
+}
 
 void asymmetricRange(int flexSign, double flexDeg, double extDeg, double& minimum, double& maximum) {
   if (flexSign >= 0) {
@@ -253,6 +290,21 @@ class ModelBuilder {
     collisions_.push_back(primitive);
   }
 
+  void addCollisionBox(const std::string& body, const std::string& name, Vec3 center, Vec3 half, const double quat[4]) {
+    Primitive primitive;
+    primitive.body = body;
+    primitive.name = name;
+    primitive.a = center;
+    primitive.half = half;
+    primitive.quat[0] = quat[0];
+    primitive.quat[1] = quat[1];
+    primitive.quat[2] = quat[2];
+    primitive.quat[3] = quat[3];
+    primitive.box = true;
+    primitive.collision = true;
+    collisions_.push_back(primitive);
+  }
+
   void addCollisionSphere(const std::string& body, const std::string& name, Vec3 center, double radius) {
     Primitive primitive;
     primitive.body = body;
@@ -317,16 +369,42 @@ class ModelBuilder {
     limb("right_hand", "right_hand", "right_hand_end", 0.030);
     limb("left_upper_leg", "left_upper_leg", "left_lower_leg", 0.066);
     limb("left_lower_leg", "left_lower_leg", "left_foot", 0.048);
-    limb("left_foot", "left_foot", "left_toe_end", 0.036);
     limb("right_upper_leg", "right_upper_leg", "right_lower_leg", 0.066);
     limb("right_lower_leg", "right_lower_leg", "right_foot", 0.048);
-    limb("right_foot", "right_foot", "right_toe_end", 0.036);
+    // A flat sole. The imported toe sits below the ankle, so a capsule to that
+    // point rolls onto the toe and pins the ankle at its dorsiflexion stop.
+    auto sole = [&](const std::string& side) {
+      const std::string foot = side + "_foot";
+      const Vec3 ankle = localOf(foot, foot);
+      Vec3 along = localOf(foot, side + "_toe_end") - ankle;
+      along.z = 0;
+      along = normalize(along);
+      if (length(along) < 0.5) along = {0, -1, 0};
+      constexpr double toe = 0.09;
+      constexpr double heel = 0.09;
+      constexpr double width = 0.08;
+      constexpr double height = 0.022;
+      // Keep the sole below the shin capsule so the round shin cannot become the contact.
+      constexpr double drop = 0.074;
+      const Vec3 center = ankle + along * ((toe - heel) * 0.5) + Vec3{0, 0, -drop + height * 0.5};
+      const Vec3 yAxis = along;
+      Vec3 zAxis{0, 0, 1};
+      Vec3 xAxis = normalize(cross(yAxis, zAxis));
+      if (length(xAxis) < 0.5) xAxis = {1, 0, 0};
+      zAxis = normalize(cross(xAxis, yAxis));
+      double quat[4] = {1, 0, 0, 0};
+      matToQuat(xAxis, yAxis, zAxis, quat);
+      addCollisionBox(foot, "col_" + foot, center, {width * 0.5, (toe + heel) * 0.5, height * 0.5}, quat);
+    };
+    sole("left");
+    sole("right");
   }
 
   bool assignDensities(std::string& error) {
     std::map<std::string, double> volume;
     for (const Primitive& primitive : collisions_) {
       const double piece = primitive.sphere ? sphereVolume(primitive.radius)
+                           : primitive.box  ? boxVolume(primitive.half)
                                             : capsuleVolume(length(primitive.b - primitive.a), primitive.radius);
       if (piece < 1e-8) {
         error = "Collision primitive has no volume: " + primitive.name;
@@ -352,6 +430,8 @@ class ModelBuilder {
       const double originZ = origin(primitive.body).z;
       if (primitive.sphere) {
         lowest = std::min(lowest, originZ + primitive.a.z - primitive.radius);
+      } else if (primitive.box) {
+        lowest = std::min(lowest, originZ + primitive.a.z - primitive.half.z);
       } else {
         lowest = std::min(lowest, originZ + primitive.a.z - primitive.radius);
         lowest = std::min(lowest, originZ + primitive.b.z - primitive.radius);
@@ -452,6 +532,10 @@ class ModelBuilder {
       }
       if (primitive.sphere) {
         line << "type=\"sphere\" pos=\"" << vec(primitive.a) << "\" size=\"" << primitive.radius << "\"/>";
+      } else if (primitive.box) {
+        line << "type=\"box\" pos=\"" << vec(primitive.a) << "\" size=\"" << vec(primitive.half) << "\" quat=\""
+             << num(primitive.quat[0]) << " " << num(primitive.quat[1]) << " " << num(primitive.quat[2]) << " "
+             << num(primitive.quat[3]) << "\"/>";
       } else {
         line << "type=\"capsule\" fromto=\"" << vec(primitive.a) << " " << vec(primitive.b) << "\" size=\""
              << primitive.radius << "\"/>";

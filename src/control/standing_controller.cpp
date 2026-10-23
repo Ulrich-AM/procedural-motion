@@ -16,10 +16,15 @@ constexpr double kGravity = 9.81;
 
 // Ankle/hip feedback gains. These scale the gravity moment m*g*capture, then
 // the joint torque limit clamps the result. They are not stiff pose springs.
+// Capture is a COM-meter gain on m*g. Both ankles share it, so the total moment
+// is k * m * g * capture. The pose springs add a little more. Rate damping stays
+// modest so a landing spike cannot spend the whole ankle torque budget.
 constexpr double kAnkleCapture = 0.8;
 constexpr double kAnkleLateral = 2.4;
 constexpr double kAnkleLean = 8.0;
-constexpr double kHipCapture = 0.12;
+constexpr double kAnkleRate = 4.0;
+constexpr double kAnkleLatRate = 4.0;
+constexpr double kHipCapture = 0.04;
 constexpr double kHipLean = 12.0;
 constexpr double kHipFilter = 0.28;
 constexpr double kSpineLean = 22.0;
@@ -93,7 +98,7 @@ const char* balanceLabel(BalanceStatus status) {
 
 StandingController::Tune StandingController::tuneFor(const std::string& jointName) const {
   // Legs carry the body. Arms only hold the imported T-pose.
-  if (jointName.find("ankle") != std::string::npos) return {45.0, 6.0, 45.0};
+  if (jointName.find("ankle") != std::string::npos) return {80.0, 8.0, 70.0};
   if (jointName.find("hip_abd") != std::string::npos) return {650.0, 50.0, 120.0};
   if (jointName.find("hip_flex") != std::string::npos) return {300.0, 24.0, 100.0};
   if (jointName.find("hip") != std::string::npos) return {80.0, 8.0, 30.0};
@@ -150,8 +155,11 @@ void StandingController::capture(const SkeletonDefinition& skeleton, const BodyS
     targets_[kneeName] = kneeTarget;
     const std::string hipName = std::string(side) + "_hip_flex";
     const JointState* hip = findJoint(indexed, hipName);
-    if (hip) targets_[hipName] = clampToRange(*hip, 0.0);
-    if (ankle) targets_[ankleName] = clampToRange(*ankle, 0.0);
+    // A near-straight leg keeps the flat sole under the pelvis. The ankle
+    // cancels the remaining knee bend so the sole does not rock onto a corner.
+    const double hipTarget = -0.06;
+    if (hip) targets_[hipName] = clampToRange(*hip, hipTarget);
+    if (ankle) targets_[ankleName] = clampToRange(*ankle, -(hipTarget + kneeTarget));
     std::cout << "Standing reference: " << kneeName << " " << targets_[kneeName] << " rad, " << hipName << " "
               << (hip ? targets_[hipName] : 0) << " rad, " << ankleName << " " << (ankle ? targets_[ankleName] : 0)
               << " rad (flexion sign " << sign << ")\n";
@@ -186,16 +194,20 @@ StandingReport StandingController::diagnose(const BodyState& state) const {
   }
   // Each foot's center is force-weighted. If both feet are down, the balance
   // target is the midpoint, so load does not chase the heavier foot.
+  // Use the ankle of each planted foot. A flat sole reports contact at whichever
+  // corner is loaded, and chasing that corner walks the body off the foot.
   int feet = 0;
   Vec3 support{0, 0, 0};
-  if (leftWeight > 1.0) {
-    support = support + leftWeighted / leftWeight;
+  const Indexed supportBodies = indexState(state);
+  auto addPlanted = [&](double weight, const char* name) {
+    if (weight <= 1.0) return;
+    const BodyKinematics* foot = findBody(supportBodies, name);
+    if (!foot) return;
+    support = support + foot->position;
     ++feet;
-  }
-  if (rightWeight > 1.0) {
-    support = support + rightWeighted / rightWeight;
-    ++feet;
-  }
+  };
+  addPlanted(leftWeight, "left_foot");
+  addPlanted(rightWeight, "right_foot");
   if (feet > 0) {
     report.supportValid = true;
     report.supportCenter = support / static_cast<double>(feet);
@@ -301,14 +313,15 @@ StandingReport StandingController::update(const BodyState& state, PhysicalSkelet
 
     const bool left = joint.name.rfind("left_", 0) == 0;
     const bool right = joint.name.rfind("right_", 0) == 0;
+    const bool swinging = (!swingFoot_.empty() && joint.name.rfind(swingFoot_ + "_", 0) == 0);
     const bool footDown = (left && report.leftFootContact) || (right && report.rightFootContact);
-    if (supported && footDown && share > 0) {
+    if (supported && footDown && share > 0 && !swinging) {
       if (joint.name.find("ankle_pitch") != std::string::npos) {
         // Positive pitch is dorsiflexion and, with the foot planted, tips the body forward.
-        torque += impactScale * share * (kAnkleCapture * weight * sagCapture - kAnkleLean * sagLean - 4.0 * sagRate);
+        torque += share * (kAnkleCapture * weight * sagCapture - kAnkleLean * sagLean - kAnkleRate * sagRate);
       } else if (joint.name.find("ankle_roll") != std::string::npos) {
         // Positive roll tips the body toward character-left, so the sign is opposite the rightward error.
-        torque += impactScale * share * (-kAnkleLateral * weight * latCapture - kAnkleLean * latLean - 4.0 * latRate);
+        torque += share * (-kAnkleLateral * 0.25 * weight * latCapture - kAnkleLean * latLean - kAnkleLatRate * latRate);
       } else if (joint.name.find("hip_flex") != std::string::npos) {
         // Positive hip flexion tips the torso backward when the feet stay down.
         torque += impactScale * share * (-kHipCapture * weight * hipSagittal_ + kHipLean * sagLean + 5.0 * sagRate);
@@ -337,6 +350,16 @@ StandingReport StandingController::update(const BodyState& state, PhysicalSkelet
   report.peakTorque = peakTorque_;
   report.active = true;
   return report;
+}
+
+void StandingController::trackHinge(const JointState& joint, double target, double blend, PhysicalSkeleton& physics) {
+  const Tune tune = tuneFor(joint.name);
+  const double goal = blend * target + (1.0 - blend) * targetFor(joint.name, joint.angle);
+  double torque = tune.kp * (goal - joint.angle) - tune.kd * joint.velocity;
+  if (!std::isfinite(torque)) torque = 0;
+  torque = std::clamp(torque, -tune.limit, tune.limit);
+  if (!physics.setJointTorque(joint.name, torque, tune.limit)) torque = 0;
+  peakTorque_ = std::max(peakTorque_, std::abs(torque));
 }
 
 }  // namespace pm

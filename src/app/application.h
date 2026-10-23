@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/sim_config.h"
+#include "control/recovery_step.h"
 #include "control/standing_controller.h"
 #include "physics/physical_skeleton.h"
 #include "render/viewer.h"
@@ -37,8 +38,9 @@ class Application {
   void setPaused(bool paused);
   void setGravity(bool enabled);
   void stepPhysics();
-  void requestPush();
+  void requestPush(int direction);
   int runActiveChecks();
+  int runRecoveryChecks();
 
   static void onMouseButton(GLFWwindow* window, int button, int action, int mods);
   static void onCursor(GLFWwindow* window, double x, double y);
@@ -58,8 +60,12 @@ class Application {
   bool drawAxes_ = false;
   bool gravity_ = true;
   bool active_ = false;
+  bool recovery_ = false;
+  float pushForce_ = 90.f;
   StandingController controller_;
   StandingReport report_;
+  RecoveryStep recoveryStep_;
+  RecoveryReport recoveryReport_;
   double accumulator_ = 0;
   double cursorX_ = 0;
   double cursorY_ = 0;

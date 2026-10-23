@@ -174,6 +174,7 @@ bool Application::loadAssets(std::string& error) {
     return false;
   }
   controller_.capture(skeleton_, physics_.sample());
+  recoveryStep_.capture(skeleton_, physics_.sample());
   return true;
 }
 
@@ -236,7 +237,7 @@ bool Application::openWindow(std::string& error) {
   else if (havePelvis) look = pelvis;
   viewer_.setInitialTarget(look);
 
-  std::cout << "Controls: R reset, Space pause, N step, A active stand, P push, G gravity, C colliders, J axes, Home reset view\n";
+  std::cout << "Controls: R reset, Space pause, N step, A active stand, S recovery step, P push, G gravity, C colliders, J axes, Home reset view\n";
   std::cout << "Mouse: left orbit, right pan, wheel zoom\n";
   return true;
 }
@@ -270,7 +271,7 @@ void Application::drawUi(const BodyState& state) {
                                  ImGuiWindowFlags_NoCollapse;
   ImGui::Begin("lab", nullptr, flags);
   ImGui::TextUnformatted("PROCEDURAL MOTION LAB");
-  ImGui::TextUnformatted("Phase: 1 - Active Standing");
+  ImGui::TextUnformatted("Phase: 2 - Recovery Step");
   ImGui::Text("Simulation: %s", paused_ ? "Paused" : "Running");
   ImGui::Text("Time: %.2f s", state.time);
   ImGui::Separator();
@@ -305,18 +306,35 @@ void Application::drawUi(const BodyState& state) {
   ImGui::SameLine();
   ImGui::TextUnformatted(active_ ? "On" : "Off");
   ImGui::SameLine();
-  if (ImGui::Button("Push")) requestPush();
+  if (ImGui::Checkbox("Recovery Step", &recovery_)) {
+    if (!recovery_) recoveryStep_.reset();
+  }
+  ImGui::Text("Push %.0f N", pushForce_);
+  ImGui::SliderFloat("##push", &pushForce_, 20.f, 250.f, "%.0f N");
+  if (ImGui::Button("Forward")) requestPush(0);
+  ImGui::SameLine();
+  if (ImGui::Button("Back")) requestPush(1);
+  ImGui::SameLine();
+  if (ImGui::Button("Left")) requestPush(2);
+  ImGui::SameLine();
+  if (ImGui::Button("Right")) requestPush(3);
   ImGui::Separator();
   ImGui::Text("Active Control: %s", active_ ? "On" : "Off");
+  ImGui::Text("Recovery Step: %s", recovery_ ? "On" : "Off");
   ImGui::Text("Balance: %s", active_ ? balanceLabel(report_.balance) : "Off");
+  ImGui::Text("Step State: %s", recovery_ ? stepStateLabel(recoveryReport_.state) : "Idle");
+  ImGui::Text("Swing Foot: %s", recoveryReport_.swingFoot.empty() ? "None" : recoveryReport_.swingFoot.c_str());
   ImGui::Text("COM Error X/Y: %.3f  %.3f", report_.comErrorX, report_.comErrorY);
   ImGui::Text("COM Speed X/Y: %.3f  %.3f", report_.comSpeedX, report_.comSpeedY);
+  ImGui::Text("Capture Error: %.3f", recoveryReport_.captureError);
+  ImGui::Text("Step Distance: %.3f", recoveryReport_.stepDistance);
+  ImGui::Text("Step Phase: %.2f", recoveryReport_.phase);
   ImGui::Text("Left Foot: %s", report_.leftFootContact ? "Contact" : "Air");
   ImGui::Text("Right Foot: %s", report_.rightFootContact ? "Contact" : "Air");
   ImGui::Text("Peak Controller Torque: %.1f Nm", active_ ? report_.peakTorque : 0.0);
   ImGui::Separator();
   ImGui::TextUnformatted("R reset   Space pause   N step");
-  ImGui::TextUnformatted("A active   P push");
+  ImGui::TextUnformatted("A active   S recovery   P push");
   ImGui::TextUnformatted("G gravity   C colliders   J axes");
   ImGui::TextUnformatted("Home reset view");
   ImGui::TextUnformatted("Mouse: orbit, right-pan, wheel zoom");
@@ -333,6 +351,12 @@ void Application::drawFrame() {
   frame.drawCom = true;
   frame.drawSupport = report_.supportValid;
   frame.support = report_.supportCenter;
+  frame.drawCapture = active_;
+  frame.capture = recoveryReport_.capture;
+  frame.drawLanding = recovery_ && recoveryReport_.landingValid;
+  frame.landing = recoveryReport_.landing;
+  frame.swingPathCount = recovery_ ? recoveryReport_.pathCount : 0;
+  for (int i = 0; i < frame.swingPathCount; ++i) frame.swingPath[i] = recoveryReport_.path[i];
   frame.drawColliders = drawColliders_;
   frame.drawJointAxes = drawAxes_;
   viewer_.render(physics_.data(), frame);
@@ -628,42 +652,240 @@ int Application::runActiveChecks() {
   std::cout << "Push peak pelvis shift " << peakShift << " m, fell=" << (fell ? "yes" : "no") << "\n";
   if (peakShift < 0.012) return fail("push did not move the body");
   if (!fell) return fail("push did not knock the humanoid over");
-  std::cout << "ACTIVE CHECKS PASSED\n";
+  return runRecoveryChecks();
+}
+
+int Application::runRecoveryChecks() {
+  mjModel* model = physics_.model();
+  mjData* data = physics_.data();
+  auto fail = [&](const std::string& message) {
+    std::cerr << "RECOVERY CHECK FAILED: " << message << "\n";
+    return 1;
+  };
+  auto bodyOf = [&](const BodyState& state, const char* name) -> const BodyKinematics* {
+    for (const BodyKinematics& body : state.bodies) {
+      if (body.name == name) return &body;
+    }
+    return nullptr;
+  };
+  auto hingeOf = [&](const BodyState& state, const std::string& name) -> const JointState* {
+    for (const JointState& joint : state.joints) {
+      if (joint.name == name) return &joint;
+    }
+    return nullptr;
+  };
+  auto footLoad = [&](const BodyState& state, const char* side) {
+    double load = 0;
+    const std::string token = std::string(side) + "_foot";
+    for (const ContactState& contact : state.contacts) {
+      const bool foot = contact.geom1.find(token) != std::string::npos || contact.geom2.find(token) != std::string::npos;
+      const bool floor = contact.geom1 == "floor" || contact.geom2 == "floor";
+      if (foot && floor) load += std::max(0.0, contact.normalForce);
+    }
+    return load;
+  };
+  auto uprightNow = [&](const BodyState& state) {
+    const BodyKinematics* pelvis = bodyOf(state, "pelvis");
+    if (!pelvis) return false;
+    const double* r = pelvis->rotation;
+    const double up = r[6] * skeleton_.up.x + r[7] * skeleton_.up.y + r[8] * skeleton_.up.z;
+    return pelvis->position.z > 0.70 && up > 0.85;
+  };
+
+  physics_.reset();
+  controller_.capture(skeleton_, physics_.sample());
+  recoveryStep_.capture(skeleton_, physics_.sample());
+  const double dt = model->opt.timestep;
+  auto drive = [&](bool recovery) {
+    const BodyState state = physics_.sample();
+    controller_.update(state, physics_);
+    recoveryStep_.update(state, controller_, physics_, recovery);
+    physics_.step();
+    return finiteArray(data->qpos, model->nq) && finiteArray(data->qvel, model->nv) &&
+           physics_.lastRootAppliedForce() <= 1e-8 && physics_.lastPeakJointTorque() <= 120.01;
+  };
+
+  const int quietSteps = std::max(1, static_cast<int>(std::lround(3.0 / dt)));
+  double peakAnkle = 0;
+  for (int step = 0; step < quietSteps; ++step) {
+    const BodyState state = physics_.sample();
+    controller_.update(state, physics_);
+    const RecoveryReport stepReport = recoveryStep_.update(state, controller_, physics_, true);
+    physics_.step();
+    if (physics_.lastRootAppliedForce() > 1e-8 || physics_.lastPeakJointTorque() > 120.01) {
+      return fail("quiet stand forced the root or exceeded a torque limit");
+    }
+    if (!finiteArray(data->qpos, model->nq) || !finiteArray(data->qvel, model->nv)) {
+      return fail("quiet stand became non-finite");
+    }
+    if (stepReport.state != StepState::Idle) return fail("quiet stand requested a recovery step");
+    if (!uprightNow(state)) return fail("quiet stand left the upright pose");
+    for (const char* name : {"left_ankle_pitch", "right_ankle_pitch"}) {
+      const JointState* ankle = hingeOf(state, name);
+      if (!ankle) return fail("ankle missing");
+      peakAnkle = std::max(peakAnkle, std::abs(ankle->angle));
+    }
+  }
+  {
+    const BodyState state = physics_.sample();
+    const JointState* ankle = hingeOf(state, "left_ankle_pitch");
+    if (!ankle || std::abs(ankle->angle) > 0.55) {
+      return fail("quiet standing still rests an ankle near its range stop");
+    }
+    if (footLoad(state, "left") < 20 || footLoad(state, "right") < 20) return fail("quiet stand lost a foot contact");
+    std::cout << "  quiet ankle |pitch| peak " << peakAnkle << " rad, left " << (ankle ? ankle->angle : 0) << "\n";
+  }
+
+  auto trial = [&](Vec3 direction, double force, double seconds, bool expectRecover) {
+    physics_.reset();
+    controller_.capture(skeleton_, physics_.sample());
+    recoveryStep_.capture(skeleton_, physics_.sample());
+    const int settle = std::max(1, static_cast<int>(std::lround(1.0 / dt)));
+    for (int step = 0; step < settle; ++step) {
+      if (!drive(true)) return std::string("pre-push stand failed");
+    }
+    const BodyState before = physics_.sample();
+    const BodyKinematics* left0 = bodyOf(before, "left_foot");
+    const BodyKinematics* right0 = bodyOf(before, "right_foot");
+    if (!left0 || !right0) return std::string("feet missing");
+    const double leftZ0 = left0->position.z;
+    const double rightZ0 = right0->position.z;
+    physics_.startBodyForcePulse("chest", normalize(direction) * force, seconds);
+
+    double leftLift = 0;
+    double rightLift = 0;
+    double leftTravel = 0;
+    double rightTravel = 0;
+    bool sawSwing = false;
+    bool sawAir = false;
+    bool sawPlant = false;
+    std::string swing;
+    Vec3 landing{};
+    bool hadLanding = false;
+    for (int step = 0; step < static_cast<int>(std::lround(3.2 / dt)); ++step) {
+      const BodyState state = physics_.sample();
+      if (!finiteArray(data->qpos, model->nq) || !finiteArray(data->qvel, model->nv)) return std::string("non-finite");
+      const BodyKinematics* left = bodyOf(state, "left_foot");
+      const BodyKinematics* right = bodyOf(state, "right_foot");
+      if (!left || !right) return std::string("feet missing");
+      leftLift = std::max(leftLift, left->position.z - leftZ0);
+      rightLift = std::max(rightLift, right->position.z - rightZ0);
+      leftTravel = std::max(leftTravel, length(Vec3{left->position.x - left0->position.x, left->position.y - left0->position.y, 0}));
+      rightTravel = std::max(rightTravel, length(Vec3{right->position.x - right0->position.x, right->position.y - right0->position.y, 0}));
+      if (footLoad(state, "left") < 8.0 || footLoad(state, "right") < 8.0) sawAir = true;
+      controller_.update(state, physics_);
+      const RecoveryReport stepReport = recoveryStep_.update(state, controller_, physics_, true);
+      if (stepReport.state == StepState::Swing || stepReport.state == StepState::Plant) {
+        sawSwing = true;
+        swing = stepReport.swingFoot;
+        landing = stepReport.landing;
+        hadLanding = stepReport.landingValid;
+      }
+      if (sawSwing && (stepReport.state == StepState::Settle || stepReport.state == StepState::Idle) &&
+          footLoad(state, swing.empty() ? "left" : swing.c_str()) > 30.0) {
+        sawPlant = true;
+      }
+      physics_.step();
+      if (physics_.lastRootAppliedForce() > 1e-8) return std::string("root force");
+      if (physics_.lastPeakJointTorque() > 120.01) return std::string("torque limit exceeded");
+    }
+    const BodyState end = physics_.sample();
+    const bool up = uprightNow(end);
+    const double lift = std::max(leftLift, rightLift);
+    const double travel = swing == "right" ? rightTravel : leftTravel;
+    std::cout << "  push " << force << " N  lift " << lift << " m  travel " << travel << " m  swing " << (sawSwing ? swing : "none")
+              << "  upright " << (up ? "yes" : "no") << "\n";
+    if (expectRecover) {
+      if (!sawSwing) return std::string("no recovery step");
+      if (!sawAir || lift < 0.04) return std::string("swing foot did not leave the floor");
+      if (travel < 0.08) return std::string("swing foot did not travel");
+      if (hadLanding) {
+        const BodyKinematics* moved = bodyOf(end, (swing + "_foot").c_str());
+        const BodyKinematics* start = swing == "right" ? right0 : left0;
+        if (moved && start) {
+          const double beforeGap = length(Vec3{start->position.x - landing.x, start->position.y - landing.y, 0});
+          const double afterGap = length(Vec3{moved->position.x - landing.x, moved->position.y - landing.y, 0});
+          if (afterGap > beforeGap - 0.03) return std::string("foot did not move toward the landing target");
+        }
+      }
+      if (!sawPlant) return std::string("physical contact did not end the swing");
+      if (!up) return std::string("did not return upright");
+      if (footLoad(end, "left") < 15 || footLoad(end, "right") < 15) return std::string("final support is not two feet");
+    } else if (up && lift < 0.02) {
+      return std::string("extreme push neither stepped nor fell");
+    } else if (up) {
+      return std::string("extreme push was recovered");
+    }
+    return std::string();
+  };
+
+  Vec3 forward = skeleton_.forward;
+  Vec3 right = skeleton_.right;
+  const std::string forwardResult = trial(forward, 110.0, 0.16, true);
+  if (!forwardResult.empty()) return fail("forward recovery: " + forwardResult);
+  const std::string sideResult = trial(right, 130.0, 0.16, true);
+  if (!sideResult.empty()) return fail("lateral recovery: " + sideResult);
+  const std::string fallResult = trial(forward, 400.0, 0.30, false);
+  if (!fallResult.empty()) return fail("extreme push: " + fallResult);
+
+  std::cout << "RECOVERY CHECKS PASSED\n";
   std::cout << "SELF-TEST PASS\n";
+  physics_.reset();
+  controller_.capture(skeleton_, physics_.sample());
+  recoveryStep_.capture(skeleton_, physics_.sample());
   return 0;
 }
 
 void Application::stepPhysics() {
+  const BodyState state = physics_.sample();
   if (active_) {
-    report_ = controller_.update(physics_.sample(), physics_);
+    report_ = controller_.update(state, physics_);
+    recoveryReport_ = recoveryStep_.update(state, controller_, physics_, recovery_);
+    report_.peakTorque = controller_.peakTorque();
   } else {
     physics_.clearJointTorques();
-    report_ = controller_.diagnose(physics_.sample());
+    controller_.setSwingFoot("");
+    report_ = controller_.diagnose(state);
+    recoveryStep_.reset();
+    recoveryReport_ = {};
   }
   physics_.step();
 }
 
-void Application::requestPush() {
+void Application::requestPush(int direction) {
   const BodyState state = physics_.sample();
   Vec3 forward = skeleton_.forward;
+  Vec3 right = skeleton_.right;
   for (const BodyKinematics& body : state.bodies) {
     if (body.name != "pelvis") continue;
     const double* rotation = body.rotation;
-    forward = {rotation[0] * skeleton_.forward.x + rotation[1] * skeleton_.forward.y + rotation[2] * skeleton_.forward.z,
-               rotation[3] * skeleton_.forward.x + rotation[4] * skeleton_.forward.y + rotation[5] * skeleton_.forward.z,
-               0};
+    auto rotate = [&](Vec3 local) {
+      return Vec3{rotation[0] * local.x + rotation[1] * local.y + rotation[2] * local.z,
+                  rotation[3] * local.x + rotation[4] * local.y + rotation[5] * local.z, 0};
+    };
+    forward = rotate(skeleton_.forward);
+    right = rotate(skeleton_.right);
     break;
   }
   forward.z = 0;
+  right.z = 0;
   forward = normalize(forward);
+  right = normalize(right);
   if (length(forward) < 0.5) forward = normalize(skeleton_.forward);
-  // Brief and weak. A harder shove is still able to knock the body over.
-  physics_.startBodyForcePulse("chest", forward * 40.0, 0.12);
+  if (length(right) < 0.5) right = normalize(skeleton_.right);
+  Vec3 axis = forward;
+  if (direction == 1) axis = forward * -1;
+  if (direction == 2) axis = right * -1;
+  if (direction == 3) axis = right;
+  const double force = std::clamp(static_cast<double>(pushForce_), 20.0, 250.0);
+  physics_.startBodyForcePulse("chest", axis * force, 0.12);
 }
 
 void Application::resetSimulation() {
   physics_.reset();
   controller_.capture(skeleton_, physics_.sample());
+  recoveryStep_.capture(skeleton_, physics_.sample());
+  recoveryReport_ = {};
   accumulator_ = 0;
 }
 
@@ -730,7 +952,11 @@ void Application::onKey(GLFWwindow* window, int key, int, int action, int) {
     if (app->active_) app->controller_.resetFilters();
     else app->physics_.clearJointTorques();
   }
-  if (key == GLFW_KEY_P && action == GLFW_PRESS) app->requestPush();
+  if (key == GLFW_KEY_S && action == GLFW_PRESS) {
+    app->recovery_ = !app->recovery_;
+    if (!app->recovery_) app->recoveryStep_.reset();
+  }
+  if (key == GLFW_KEY_P && action == GLFW_PRESS) app->requestPush(0);
 }
 
 }  // namespace pm

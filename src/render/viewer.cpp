@@ -11,6 +11,7 @@
 #endif
 #include <GL/gl.h>
 
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 
@@ -144,6 +145,28 @@ void Viewer::addSupportMarker(Vec3 support) {
   addSphere({support.x, support.y, 0.014}, 0.028, marker);
 }
 
+void Viewer::addCross(Vec3 point, const float rgba[4]) {
+  const double z = 0.02;
+  addCapsule({point.x - 0.045, point.y, z}, {point.x + 0.045, point.y, z}, 0.004, rgba);
+  addCapsule({point.x, point.y - 0.045, z}, {point.x, point.y + 0.045, z}, 0.004, rgba);
+}
+
+void Viewer::addRing(Vec3 point, const float rgba[4]) {
+  constexpr int count = 12;
+  constexpr double radius = 0.045;
+  const double z = 0.022;
+  for (int i = 0; i < count; ++i) {
+    const double a0 = 6.283185307179586 * static_cast<double>(i) / count;
+    const double a1 = 6.283185307179586 * static_cast<double>(i + 1) / count;
+    addCapsule({point.x + std::cos(a0) * radius, point.y + std::sin(a0) * radius, z},
+               {point.x + std::cos(a1) * radius, point.y + std::sin(a1) * radius, z}, 0.0035, rgba);
+  }
+}
+
+void Viewer::addPath(const Vec3* points, int count, const float rgba[4]) {
+  for (int i = 1; i < count; ++i) addCapsule(points[i - 1], points[i], 0.004, rgba);
+}
+
 void Viewer::addJointAxes(const mjData* data) {
   if (!model_ || !data) return;
   for (int joint = 0; joint < model_->njnt; ++joint) {
@@ -187,6 +210,18 @@ void Viewer::render(mjData* data, const RenderFrame& frame) {
   addGrid();
   if (frame.drawCom) addComMarker(frame.com);
   if (frame.drawSupport) addSupportMarker(frame.support);
+  if (frame.drawCapture) {
+    const float capture[4] = {0.15f, 0.15f, 0.15f, 1.f};
+    addCross(frame.capture, capture);
+  }
+  if (frame.drawLanding) {
+    const float landing[4] = {0.05f, 0.05f, 0.05f, 1.f};
+    addRing(frame.landing, landing);
+  }
+  if (frame.swingPathCount > 1) {
+    const float path[4] = {0.2f, 0.2f, 0.2f, 1.f};
+    addPath(frame.swingPath, frame.swingPathCount, path);
+  }
   if (frame.drawJointAxes) addJointAxes(data);
 
   mjrRect viewport{0, 0, width, height};

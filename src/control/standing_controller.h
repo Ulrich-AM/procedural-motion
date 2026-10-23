@@ -37,6 +37,13 @@ class StandingController {
   StandingReport diagnose(const BodyState& state) const;
   StandingReport update(const BodyState& state, PhysicalSkeleton& physics);
 
+  // Empty, "left", or "right". That leg keeps its pose spring but does not
+  // receive the two-foot balance term while it is the swing leg.
+  void setSwingFoot(const std::string& side) { swingFoot_ = side; }
+  // Overwrite one hinge command with a torque toward target. blend 1 uses
+  // target; blend 0 uses the standing reference.
+  void trackHinge(const JointState& joint, double target, double blend, PhysicalSkeleton& physics);
+
   double peakTorque() const { return peakTorque_; }
   double referenceTarget(const std::string& jointName) const;
 
@@ -58,6 +65,7 @@ class StandingController {
   double hipLateral_ = 0;
   double lastTime_ = -1;
   double peakTorque_ = 0;
+  std::string swingFoot_;
 };
 
 const char* balanceLabel(BalanceStatus status);
