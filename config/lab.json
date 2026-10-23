@@ -1,0 +1,7 @@
+{
+  "fixed_timestep_seconds": 0.008333333333,
+  "gravity_z": -9.81,
+  "spawn_clearance_meters": 0.08,
+  "solver_iterations": 20,
+  "max_substeps_per_frame": 8
+}

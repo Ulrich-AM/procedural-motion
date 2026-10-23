@@ -1,0 +1,15 @@
+build/
+out/
+.vs/
+.vscode/
+CMakeUserPresets.json
+CMakeCache.txt
+cmake-build-*/
+*.user
+*.suo
+imgui.ini
+*.bmp
+*.pdb
+*.ilk
+*.exp
+*.obj

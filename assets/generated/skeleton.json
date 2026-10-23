@@ -1,0 +1,336 @@
+{
+  "animation_curves_imported": false,
+  "auxiliary": [
+    {
+      "name": "head_top",
+      "parent": "head",
+      "position": [
+        -5.8748304973050835e-05,
+        -0.06295597266405821,
+        1.6805783843994142
+      ],
+      "purpose": "head length",
+      "source": "mixamorig:HeadTop_End",
+      "source_parent": "head"
+    },
+    {
+      "name": "left_hand_end",
+      "parent": "left_hand",
+      "position": [
+        0.8477700714127276,
+        0.06171440042715999,
+        1.330807985773648
+      ],
+      "purpose": "palm length",
+      "source": "mixamorig:LeftHandMiddle1",
+      "source_parent": "left_hand"
+    },
+    {
+      "name": "right_hand_end",
+      "parent": "right_hand",
+      "position": [
+        -0.8478288352213075,
+        0.0617144975083545,
+        1.3306600199090788
+      ],
+      "purpose": "palm length",
+      "source": "mixamorig:RightHandMiddle1",
+      "source_parent": "right_hand"
+    },
+    {
+      "name": "left_toe_end",
+      "parent": "left_foot",
+      "position": [
+        0.09355875096550335,
+        -0.21333871077746155,
+        -0.07383769750595093
+      ],
+      "purpose": "foot length",
+      "source": "mixamorig:LeftToe_End",
+      "source_parent": "left_foot"
+    },
+    {
+      "name": "right_toe_end",
+      "parent": "right_foot",
+      "position": [
+        -0.09356269755134235,
+        -0.21333810042589907,
+        -0.07383509397506714
+      ],
+      "purpose": "foot length",
+      "source": "mixamorig:RightToe_End",
+      "source_parent": "right_foot"
+    }
+  ],
+  "axes": {
+    "forward": [
+      7.879169529554903e-07,
+      -0.9999999999996896,
+      0.0
+    ],
+    "right": [
+      -0.9999999999996896,
+      -7.879169529554903e-07,
+      0.0
+    ],
+    "up": [
+      0.0,
+      0.0,
+      1.0
+    ]
+  },
+  "bones": [
+    {
+      "name": "pelvis",
+      "parent": "",
+      "position": [
+        0.0,
+        0.0,
+        0.8929974365234375
+      ],
+      "source": "mixamorig:Hips",
+      "source_key": "Hips",
+      "source_parent": "RootNode"
+    },
+    {
+      "name": "spine_lower",
+      "parent": "pelvis",
+      "position": [
+        -1.9156077541993e-08,
+        0.012273349054157733,
+        0.9922320556640626
+      ],
+      "source": "mixamorig:Spine",
+      "source_key": "Spine",
+      "source_parent": "mixamorig:Hips"
+    },
+    {
+      "name": "spine_upper",
+      "parent": "spine_lower",
+      "position": [
+        -1.1565263512238743e-05,
+        0.026496761329472065,
+        1.108686447143555
+      ],
+      "source": "mixamorig:Spine1",
+      "source_key": "Spine1",
+      "source_parent": "mixamorig:Spine"
+    },
+    {
+      "name": "chest",
+      "parent": "spine_upper",
+      "position": [
+        -2.2303980904325728e-05,
+        0.04276135731488467,
+        1.2422884368896485
+      ],
+      "source": "mixamorig:Spine2",
+      "source_key": "Spine2",
+      "source_parent": "mixamorig:Spine1"
+    },
+    {
+      "name": "neck",
+      "parent": "chest",
+      "position": [
+        -3.5169131251677754e-05,
+        0.03483230877667666,
+        1.3926132965087892
+      ],
+      "source": "mixamorig:Neck",
+      "source_key": "Neck",
+      "source_parent": "mixamorig:Spine2"
+    },
+    {
+      "name": "head",
+      "parent": "neck",
+      "position": [
+        -4.4157520997032406e-05,
+        0.0034080200269818307,
+        1.4958316802978517
+      ],
+      "source": "mixamorig:Head",
+      "source_key": "Head",
+      "source_parent": "mixamorig:Neck"
+    },
+    {
+      "name": "left_shoulder",
+      "parent": "chest",
+      "position": [
+        0.061027985432056085,
+        0.03570583630353213,
+        1.3333980560302736
+      ],
+      "source": "mixamorig:LeftShoulder",
+      "source_key": "LeftShoulder",
+      "source_parent": "mixamorig:Spine2"
+    },
+    {
+      "name": "left_upper_arm",
+      "parent": "left_shoulder",
+      "position": [
+        0.1875785931133305,
+        0.06171501923352481,
+        1.3307497406005862
+      ],
+      "source": "mixamorig:LeftArm",
+      "source_key": "LeftArm",
+      "source_parent": "mixamorig:LeftShoulder"
+    },
+    {
+      "name": "left_lower_arm",
+      "parent": "left_upper_arm",
+      "position": [
+        0.46162543378105514,
+        0.061714880950748924,
+        1.3307738494873047
+      ],
+      "source": "mixamorig:LeftForeArm",
+      "source_key": "LeftForeArm",
+      "source_parent": "mixamorig:LeftArm"
+    },
+    {
+      "name": "left_hand",
+      "parent": "left_lower_arm",
+      "position": [
+        0.7377700718425786,
+        0.06171461392194033,
+        1.3307982635498048
+      ],
+      "source": "mixamorig:LeftHand",
+      "source_key": "LeftHand",
+      "source_parent": "mixamorig:LeftForeArm"
+    },
+    {
+      "name": "right_shoulder",
+      "parent": "chest",
+      "position": [
+        -0.061087216518017164,
+        0.0357057361677289,
+        1.3333882904052736
+      ],
+      "source": "mixamorig:RightShoulder",
+      "source_key": "RightShoulder",
+      "source_parent": "mixamorig:Spine2"
+    },
+    {
+      "name": "right_upper_arm",
+      "parent": "right_shoulder",
+      "position": [
+        -0.1876373950458492,
+        0.061714723594486716,
+        1.3307170867919924
+      ],
+      "source": "mixamorig:RightArm",
+      "source_key": "RightArm",
+      "source_parent": "mixamorig:RightShoulder"
+    },
+    {
+      "name": "right_lower_arm",
+      "parent": "right_upper_arm",
+      "position": [
+        -0.4616841975666012,
+        0.06171474266797305,
+        1.3306934356689455
+      ],
+      "source": "mixamorig:RightForeArm",
+      "source_key": "RightForeArm",
+      "source_parent": "mixamorig:RightArm"
+    },
+    {
+      "name": "right_hand",
+      "parent": "right_lower_arm",
+      "position": [
+        -0.7378288356281246,
+        0.061714632995426656,
+        1.3306694793701173
+      ],
+      "source": "mixamorig:RightHand",
+      "source_key": "RightHand",
+      "source_parent": "mixamorig:RightForeArm"
+    },
+    {
+      "name": "left_upper_leg",
+      "parent": "pelvis",
+      "position": [
+        0.09124454579582562,
+        0.0005537125840783119,
+        0.8264334869384765
+      ],
+      "source": "mixamorig:LeftUpLeg",
+      "source_key": "LeftUpLeg",
+      "source_parent": "mixamorig:Hips"
+    },
+    {
+      "name": "left_lower_leg",
+      "parent": "left_upper_leg",
+      "position": [
+        0.0936911304973637,
+        0.005709899552166462,
+        0.4204792404174804
+      ],
+      "source": "mixamorig:LeftLeg",
+      "source_key": "LeftLeg",
+      "source_parent": "mixamorig:LeftUpLeg"
+    },
+    {
+      "name": "left_foot",
+      "parent": "left_lower_leg",
+      "position": [
+        0.09124421200981488,
+        0.02630146313458681,
+        0.0
+      ],
+      "source": "mixamorig:LeftFoot",
+      "source_key": "LeftFoot",
+      "source_parent": "mixamorig:LeftLeg"
+    },
+    {
+      "name": "right_upper_leg",
+      "parent": "pelvis",
+      "position": [
+        -0.0912445155597652,
+        0.0005538459494709968,
+        0.8264334869384765
+      ],
+      "source": "mixamorig:RightUpLeg",
+      "source_key": "RightUpLeg",
+      "source_parent": "mixamorig:Hips"
+    },
+    {
+      "name": "right_lower_leg",
+      "parent": "right_upper_leg",
+      "position": [
+        -0.09369156756171833,
+        0.005696747787296772,
+        0.4204790496826172
+      ],
+      "source": "mixamorig:RightLeg",
+      "source_key": "RightLeg",
+      "source_parent": "mixamorig:RightUpLeg"
+    },
+    {
+      "name": "right_foot",
+      "parent": "right_lower_leg",
+      "position": [
+        -0.09124511637458453,
+        0.0263021020963788,
+        4.577636718711142e-07
+      ],
+      "source": "mixamorig:RightFoot",
+      "source_key": "RightFoot",
+      "source_parent": "mixamorig:RightLeg"
+    }
+  ],
+  "ignored_animation_count": 1,
+  "ignored_animation_names": [
+    "mixamo.com"
+  ],
+  "mesh_imported": false,
+  "notes": "Rest pose only. Animation curves were not stored. The mesh is not used.",
+  "source_file": "ybot.fbx",
+  "source_scale_to_meters": 0.01,
+  "units": "meters",
+  "up_axis": "z",
+  "up_conversion_mode": 0,
+  "version": 1
+}
