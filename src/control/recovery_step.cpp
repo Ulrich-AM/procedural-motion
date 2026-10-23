@@ -15,7 +15,7 @@ constexpr double kHeel = 0.09;
 constexpr double kHalfWidth = 0.040;
 constexpr double kAnkleHeight = 0.074;
 constexpr double kClearance = 0.08;
-constexpr double kEnterMargin = 0.045;
+constexpr double kEnterMargin = 0.028;
 constexpr double kExitMargin = 0.02;
 
 double smoothstep(double phase) {
@@ -89,6 +89,8 @@ void RecoveryStep::capture(const SkeletonDefinition& skeleton, const BodyState& 
   };
   measure(leftLeg_, "left", -1);
   measure(rightLeg_, "right", 1);
+  leftLeg_.calibrated = false;
+  rightLeg_.calibrated = false;
   captured_ = true;
 }
 
@@ -244,40 +246,51 @@ RecoveryReport RecoveryStep::update(const BodyState& state, StandingController& 
     if (insideTime_ > 0.20) armed_ = true;
   }
 
-  auto begin = [&](const std::string& side) {
+  auto placeFoot = [&](const std::string& side) {
     const BodyKinematics* foot = body(state, side + "_foot");
     const BodyKinematics* hip = body(state, side + "_upper_leg");
     if (!foot || !hip || !pelvis) return;
+    const Side& spec = side == "left" ? leftLeg_ : rightLeg_;
+    Vec3 desired = capture + right * (spec.sign * 0.11) + forward * (0.02 * (sag >= 0 ? 1.0 : -1.0));
+    desired.z = 0;
+    const double leg = spec.lengths.thigh + spec.lengths.shin;
+    const double vertical = std::max(0.20, hip->position.z - kAnkleHeight);
+    const double reach = 0.96 * leg;
+    const double reachable = std::sqrt(std::max(0.03, reach * reach - vertical * vertical));
+    double placeSag = dot(desired - pelvis->position, forward);
+    double placeLat = dot(desired - pelvis->position, right);
+    placeSag = std::clamp(placeSag, -std::min(0.16, reachable), std::min(0.22, reachable));
+    const BodyKinematics* other = body(state, side == "left" ? "right_foot" : "left_foot");
+    if (other) {
+      const double otherLat = dot(other->position - pelvis->position, right);
+      if (spec.sign < 0) placeLat = std::min(placeLat, otherLat - 0.11);
+      else placeLat = std::max(placeLat, otherLat + 0.11);
+    }
+    const double latLimit = std::min(0.28, std::max(0.08, reachable));
+    placeLat = std::clamp(placeLat, spec.sign < 0 ? -latLimit : 0.06, spec.sign < 0 ? -0.06 : latLimit);
+    const double horiz = std::hypot(placeSag, placeLat);
+    if (horiz > reachable && horiz > 1e-4) {
+      placeSag *= reachable / horiz;
+      placeLat *= reachable / horiz;
+    }
+    desired = pelvis->position + forward * placeSag + right * placeLat;
+    desired.z = 0;
+    ankleTarget_ = desired + Vec3{0, 0, kAnkleHeight};
+    landing_ = desired;
+    if (swingStart_.x == 0 && swingStart_.y == 0) swingStart_ = foot->position;
+    stepDistance_ = length(Vec3{ankleTarget_.x - foot->position.x, ankleTarget_.y - foot->position.y, 0});
+    duration_ = std::clamp(0.30 + 0.28 * stepDistance_, 0.30, 0.48);
+  };
+
+  auto begin = [&](const std::string& side) {
+    const BodyKinematics* foot = body(state, side + "_foot");
+    if (!foot || !pelvis) return;
     swing_ = side;
     state_ = StepState::Prepare;
     stateTime_ = 0;
     armed_ = false;
     swingStart_ = foot->position;
-    const Side& spec = side == "left" ? leftLeg_ : rightLeg_;
-    Vec3 desired = capture + right * (spec.sign * 0.12) + forward * (0.04 * (std::abs(sag) > std::abs(lat) ? (sag >= 0 ? 1 : -1) : 1));
-    desired.z = 0;
-    double placeSag = dot(desired - pelvis->position, forward);
-    double placeLat = dot(desired - pelvis->position, right);
-    placeSag = std::clamp(placeSag, -0.20, 0.42);
-    const BodyKinematics* other = body(state, side == "left" ? "right_foot" : "left_foot");
-    if (other) {
-      const double otherLat = dot(other->position - pelvis->position, right);
-      if (spec.sign < 0) placeLat = std::min(placeLat, otherLat - 0.12);
-      else placeLat = std::max(placeLat, otherLat + 0.12);
-    }
-    placeLat = std::clamp(placeLat, spec.sign < 0 ? -0.42 : 0.06, spec.sign < 0 ? -0.06 : 0.42);
-    desired = pelvis->position + forward * placeSag + right * placeLat;
-    desired.z = 0;
-    const Vec3 ankle = desired - forward * ((kToe - kHeel) * 0.5) + Vec3{0, 0, kAnkleHeight};
-    Vec3 reach = ankle - hip->position;
-    const double maxReach = 0.92 * (spec.lengths.thigh + spec.lengths.shin);
-    if (length(reach) > maxReach) reach = normalize(reach) * maxReach;
-    ankleTarget_ = hip->position + reach;
-    ankleTarget_.z = std::max(kAnkleHeight, ankleTarget_.z);
-    landing_ = ankleTarget_;
-    landing_.z = 0;
-    stepDistance_ = length(Vec3{ankleTarget_.x - swingStart_.x, ankleTarget_.y - swingStart_.y, 0});
-    duration_ = std::clamp(0.38 + 0.35 * stepDistance_, 0.35, 0.60);
+    placeFoot(side);
   };
 
   if (state_ == StepState::Idle && armed_ && outsideTime_ > 0.06) {
@@ -300,7 +313,19 @@ RecoveryReport RecoveryStep::update(const BodyState& state, StandingController& 
 
   if (state_ == StepState::Prepare) {
     stateTime_ += dt;
+    Side& specSide = swing_ == "left" ? leftLeg_ : rightLeg_;
     const BodyKinematics* hip = body(state, swing_ + "_upper_leg");
+    const BodyKinematics* footNow = body(state, swing_ + "_foot");
+    if (!specSide.calibrated && hip && footNow) {
+      const LegPose echo = solveLeg(hip->position, footNow->position, forward, right, up_, specSide.lengths);
+      if (const JointState* hipJ = joint(state, swing_ + "_hip_flex")) {
+        specSide.lengths.hipFlexBias = hipJ->angle - echo.hipFlex;
+      }
+      if (const JointState* abdJ = joint(state, swing_ + "_hip_abd")) {
+        specSide.lengths.hipAbdBias = abdJ->angle - echo.hipAbd;
+      }
+      specSide.calibrated = true;
+    }
     if (hip) {
       Vec3 lifted = swingStart_;
       lifted.z = kAnkleHeight + 0.03;
@@ -308,7 +333,7 @@ RecoveryReport RecoveryStep::update(const BodyState& state, StandingController& 
       const LegPose pose = solveLeg(hip->position, lifted, forward, right, up_, spec.lengths);
       trackSwing(state, standing, physics, pose, std::clamp(stateTime_ / 0.12, 0.0, 1.0));
     }
-    if (stateTime_ > 0.14 || footLoad(state, swing_) < 25.0) {
+    if (stateTime_ > 0.12 || footLoad(state, swing_) < 25.0) {
       state_ = StepState::Swing;
       stateTime_ = 0;
       if (const BodyKinematics* foot = body(state, swing_ + "_foot")) swingStart_ = foot->position;
@@ -346,7 +371,7 @@ RecoveryReport RecoveryStep::update(const BodyState& state, StandingController& 
     report.phase = 1;
   } else if (state_ == StepState::Settle) {
     stateTime_ += dt;
-    const double blend = 1.0 - std::clamp(stateTime_ / 0.30, 0.0, 1.0);
+    const double blend = 1.0 - 0.35 * std::clamp(stateTime_ / 0.45, 0.0, 1.0);
     const BodyKinematics* hip = body(state, swing_ + "_upper_leg");
     if (hip && blend > 0.02) {
       const Side& spec = swing_ == "left" ? leftLeg_ : rightLeg_;
@@ -354,7 +379,11 @@ RecoveryReport RecoveryStep::update(const BodyState& state, StandingController& 
       ankle.z = kAnkleHeight;
       trackSwing(state, standing, physics, solveLeg(hip->position, ankle, forward, right, up_, spec.lengths), blend);
     }
-    if (stateTime_ > 0.30) {
+    if (stateTime_ > 0.45) {
+      const char* names[5] = {"_hip_flex", "_hip_abd", "_knee", "_ankle_pitch", "_ankle_roll"};
+      for (const char* suffix : names) {
+        if (const JointState* hinge = joint(state, swing_ + suffix)) standing.shiftReference(hinge->name, hinge->angle);
+      }
       state_ = StepState::Idle;
       standing.setSwingFoot("");
       swing_.clear();

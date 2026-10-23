@@ -8,6 +8,10 @@ struct LegLengths {
   double thigh = 0.4;
   double shin = 0.4;
   double kneeSign = -1;
+  // Joint zero is not the geometric thigh-vertical angle once the leg is crouched.
+  // Measured at the start of a step so a "hold the foot" solution does not yank the hip.
+  double hipFlexBias = 0;
+  double hipAbdBias = 0;
 };
 
 struct LegPose {

@@ -44,6 +44,7 @@ class RecoveryStep {
     std::string name;
     LegLengths lengths;
     double sign = 1;
+    bool calibrated = false;
   };
 
   Vec3 axisOf(const BodyKinematics& body, Vec3 local) const;

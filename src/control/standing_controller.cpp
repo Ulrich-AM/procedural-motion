@@ -116,6 +116,12 @@ double StandingController::referenceTarget(const std::string& jointName) const {
   return found == targets_.end() ? 0 : found->second;
 }
 
+void StandingController::shiftReference(const std::string& jointName, double angle) {
+  const auto found = targets_.find(jointName);
+  if (found == targets_.end() || !std::isfinite(angle)) return;
+  found->second = angle;
+}
+
 double StandingController::targetFor(const std::string& jointName, double currentAngle) const {
   const auto found = targets_.find(jointName);
   return found == targets_.end() ? currentAngle : found->second;
@@ -126,6 +132,8 @@ void StandingController::resetFilters() {
   hipLateral_ = 0;
   lastTime_ = -1;
   peakTorque_ = 0;
+  ankleHoldLeft_ = 0.234;
+  ankleHoldRight_ = 0.234;
 }
 
 void StandingController::capture(const SkeletonDefinition& skeleton, const BodyState& state) {
@@ -308,7 +316,20 @@ StandingReport StandingController::update(const BodyState& state, PhysicalSkelet
   for (const JointState& joint : state.joints) {
     if (joint.type != "hinge") continue;
     const Tune tune = tuneFor(joint.name);
-    const double target = targetFor(joint.name, joint.angle);
+    double target = targetFor(joint.name, joint.angle);
+    // The flat sole settles a little more dorsiflexed than the landing reference.
+    // Keep the spring on that settled angle so it does not cancel the capture torque.
+    if (joint.name.find("ankle_pitch") != std::string::npos) {
+      double& hold = joint.name.rfind("left_", 0) == 0 ? ankleHoldLeft_ : ankleHoldRight_;
+      if (state.time > 1.2 && state.time < 2.0 && std::abs(joint.velocity) < 1.2) {
+        const double follow = 1.0 - std::exp(-dt / 0.30);
+        hold += (std::clamp(joint.angle, 0.05, 0.42) - hold) * follow;
+      }
+      if (state.time > 1.5) {
+        const double blend = std::clamp((state.time - 1.5) / 0.5, 0.0, 1.0);
+        target = (1.0 - blend) * target + blend * hold;
+      }
+    }
     double torque = tune.kp * (target - joint.angle) - tune.kd * joint.velocity;
 
     const bool left = joint.name.rfind("left_", 0) == 0;
@@ -353,7 +374,19 @@ StandingReport StandingController::update(const BodyState& state, PhysicalSkelet
 }
 
 void StandingController::trackHinge(const JointState& joint, double target, double blend, PhysicalSkeleton& physics) {
-  const Tune tune = tuneFor(joint.name);
+  Tune tune = tuneFor(joint.name);
+  // The standing hip-abduction spring is stiff enough to buzz at this timestep
+  // and never reaches a swing target. Swing tracking uses a softer loop.
+  if (joint.name.find("hip_abd") != std::string::npos) {
+    tune.kp = 420;
+    tune.kd = 32;
+  } else if (joint.name.find("hip_flex") != std::string::npos) {
+    tune.kp = 280;
+    tune.kd = 18;
+  } else if (joint.name.find("knee") != std::string::npos) {
+    tune.kp = 240;
+    tune.kd = 16;
+  }
   const double goal = blend * target + (1.0 - blend) * targetFor(joint.name, joint.angle);
   double torque = tune.kp * (goal - joint.angle) - tune.kd * joint.velocity;
   if (!std::isfinite(torque)) torque = 0;

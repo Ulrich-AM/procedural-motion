@@ -46,6 +46,9 @@ class StandingController {
 
   double peakTorque() const { return peakTorque_; }
   double referenceTarget(const std::string& jointName) const;
+  // Move one standing reference onto the pose the leg actually landed in,
+  // so the pose spring does not yank the hip back to the pre-step crouch.
+  void shiftReference(const std::string& jointName, double angle);
 
  private:
   struct Tune {
@@ -65,6 +68,10 @@ class StandingController {
   double hipLateral_ = 0;
   double lastTime_ = -1;
   double peakTorque_ = 0;
+  // After the drop, the flat-foot crouch sits more flexed than the reference.
+  // These holds slide onto that angle so the pose spring stops pitching backward.
+  double ankleHoldLeft_ = 0.234;
+  double ankleHoldRight_ = 0.234;
   std::string swingFoot_;
 };
 

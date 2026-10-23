@@ -32,14 +32,16 @@ LegPose solveLeg(Vec3 hip, Vec3 ankleTarget, Vec3 forward, Vec3 right, Vec3 up, 
   const double sag = dot(delta, forward);
   const double lat = dot(delta, right);
   const double down = std::max(0.05, -dot(delta, up));
-  // Positive hip flexion points the knee along the character forward axis.
-  pose.hipFlex = std::atan2(sag, down);
-  pose.hipAbd = std::atan2(lat, down);
-
+  // Geometric flexion is positive when the ankle is forward of the hip. On this
+  // skeleton the hip and knee flexion ranges are negative, so the joint target
+  // uses kneeSign.
   const double cosOffset = clampUnit((thigh * thigh + distance * distance - shin * shin) / (2.0 * thigh * distance));
   const double offset = std::acos(cosOffset);
-  // The knee folds toward forward, so the thigh aims ahead of the hip-ankle line.
-  pose.hipFlex += lengths.kneeSign < 0.0 ? offset : -offset;
+  const double flexion = std::atan2(sag, down) + offset;
+  pose.hipFlex = (lengths.kneeSign < 0.0 ? -flexion : flexion) + lengths.hipFlexBias;
+  // Positive abduction about the shared forward axis swings the thigh toward
+  // character-left, which is the negative lateral direction.
+  pose.hipAbd = -std::atan2(lat, down) + lengths.hipAbdBias;
 
   // Keep the sole roughly level: foot pitch cancels the sagittal fold.
   pose.anklePitch = std::clamp(-(pose.hipFlex + pose.knee), -0.65, 0.65);
