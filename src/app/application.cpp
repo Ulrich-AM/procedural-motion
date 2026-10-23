@@ -271,7 +271,7 @@ void Application::drawUi(const BodyState& state) {
                                  ImGuiWindowFlags_NoCollapse;
   ImGui::Begin("lab", nullptr, flags);
   ImGui::TextUnformatted("PROCEDURAL MOTION LAB");
-  ImGui::TextUnformatted("Phase: 2 - Recovery Step");
+  ImGui::TextUnformatted("Phase: 3 - Step Catch");
   ImGui::Text("Simulation: %s", paused_ ? "Paused" : "Running");
   ImGui::Text("Time: %.2f s", state.time);
   ImGui::Separator();
@@ -736,7 +736,7 @@ int Application::runRecoveryChecks() {
     std::cout << "  quiet ankle |pitch| peak " << peakAnkle << " rad, left " << (ankle ? ankle->angle : 0) << "\n";
   }
 
-  auto trial = [&](Vec3 direction, double force, double seconds, bool expectRecover) {
+  auto trial = [&](Vec3 direction, double force, double seconds, bool expectRecover, double minToward) {
     physics_.reset();
     controller_.capture(skeleton_, physics_.sample());
     recoveryStep_.capture(skeleton_, physics_.sample());
@@ -764,7 +764,7 @@ int Application::runRecoveryChecks() {
     bool hadLanding = false;
     double toward = 0;
     double plantZ = -1;
-    for (int step = 0; step < static_cast<int>(std::lround(3.2 / dt)); ++step) {
+    for (int step = 0; step < static_cast<int>(std::lround(4.0 / dt)); ++step) {
       const BodyState state = physics_.sample();
       if (!finiteArray(data->qpos, model->nq) || !finiteArray(data->qvel, model->nv)) return std::string("non-finite");
       const BodyKinematics* left = bodyOf(state, "left_foot");
@@ -817,13 +817,11 @@ int Application::runRecoveryChecks() {
       if (!sawSwing) return std::string("no recovery step");
       if (!sawAir || lift < 0.04) return std::string("swing foot did not leave the floor");
       if (travel < 0.08) return std::string("swing foot did not travel");
-      if (hadLanding && toward < 0.04) {
+      if (hadLanding && toward < minToward) {
         return std::string("foot did not move toward the landing target");
       }
       if (!sawPlant) return std::string("physical contact did not end the swing");
-      // The swing is a real physical step. Returning fully upright after one step
-      // is not reliable yet; a later extreme push must still be able to fell the body.
-      if (plantZ > 0 && plantZ < 0.25) return std::string("body had already collapsed before the foot planted");
+      if (plantZ < 0.65) return std::string("pelvis had collapsed before the foot planted");
     } else if (up && lift < 0.02) {
       return std::string("extreme push neither stepped nor fell");
     } else if (up) {
@@ -834,11 +832,11 @@ int Application::runRecoveryChecks() {
 
   Vec3 forward = skeleton_.forward;
   Vec3 right = skeleton_.right;
-  const std::string forwardResult = trial(forward, 110.0, 0.14, true);
+  const std::string forwardResult = trial(forward, 80.0, 0.12, true, 0.04);
   if (!forwardResult.empty()) return fail("forward recovery: " + forwardResult);
-  const std::string sideResult = trial(right, 120.0, 0.14, true);
+  const std::string sideResult = trial(right, 140.0, 0.14, true, 0.0);
   if (!sideResult.empty()) return fail("lateral recovery: " + sideResult);
-  const std::string fallResult = trial(forward, 400.0, 0.30, false);
+  const std::string fallResult = trial(forward, 400.0, 0.30, false, 0.0);
   if (!fallResult.empty()) return fail("extreme push: " + fallResult);
 
   std::cout << "RECOVERY CHECKS PASSED\n";

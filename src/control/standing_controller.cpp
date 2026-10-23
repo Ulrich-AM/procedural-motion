@@ -122,6 +122,13 @@ void StandingController::shiftReference(const std::string& jointName, double ang
   found->second = angle;
 }
 
+void StandingController::noteAnkle(const std::string& jointName, double angle) {
+  if (!std::isfinite(angle) || jointName.find("ankle_pitch") == std::string::npos) return;
+  const double held = std::clamp(angle, 0.05, 0.42);
+  if (jointName.rfind("left_", 0) == 0) ankleHoldLeft_ = held;
+  if (jointName.rfind("right_", 0) == 0) ankleHoldRight_ = held;
+}
+
 double StandingController::targetFor(const std::string& jointName, double currentAngle) const {
   const auto found = targets_.find(jointName);
   return found == targets_.end() ? currentAngle : found->second;

@@ -279,7 +279,17 @@ RecoveryReport RecoveryStep::update(const BodyState& state, StandingController& 
     landing_ = desired;
     if (swingStart_.x == 0 && swingStart_.y == 0) swingStart_ = foot->position;
     stepDistance_ = length(Vec3{ankleTarget_.x - foot->position.x, ankleTarget_.y - foot->position.y, 0});
-    duration_ = std::clamp(0.30 + 0.28 * stepDistance_, 0.30, 0.48);
+    duration_ = std::clamp(0.26 + 0.22 * stepDistance_, 0.28, 0.42);
+  };
+
+  auto holdLeg = [&](const std::string& side) {
+    const char* names[5] = {"_hip_flex", "_hip_abd", "_knee", "_ankle_pitch", "_ankle_roll"};
+    for (const char* suffix : names) {
+      if (const JointState* hinge = joint(state, side + suffix)) {
+        standing.shiftReference(hinge->name, hinge->angle);
+        standing.noteAnkle(hinge->name, hinge->angle);
+      }
+    }
   };
 
   auto begin = [&](const std::string& side) {
@@ -290,6 +300,7 @@ RecoveryReport RecoveryStep::update(const BodyState& state, StandingController& 
     stateTime_ = 0;
     armed_ = false;
     swingStart_ = foot->position;
+    holdLeg(side == "left" ? "right" : "left");
     placeFoot(side);
   };
 
@@ -309,7 +320,17 @@ RecoveryReport RecoveryStep::update(const BodyState& state, StandingController& 
     begin(side);
   }
 
-  standing.setSwingFoot(state_ == StepState::Idle ? "" : swing_);
+  standing.setSwingFoot(state_ == StepState::Idle || state_ == StepState::Settle ? "" : swing_);
+
+  auto adoptLanded = [&]() {
+    const char* names[5] = {"_hip_flex", "_hip_abd", "_knee", "_ankle_pitch", "_ankle_roll"};
+    for (const char* suffix : names) {
+      if (const JointState* hinge = joint(state, swing_ + suffix)) {
+        standing.shiftReference(hinge->name, hinge->angle);
+        standing.noteAnkle(hinge->name, hinge->angle);
+      }
+    }
+  };
 
   if (state_ == StepState::Prepare) {
     stateTime_ += dt;
@@ -333,7 +354,8 @@ RecoveryReport RecoveryStep::update(const BodyState& state, StandingController& 
       const LegPose pose = solveLeg(hip->position, lifted, forward, right, up_, spec.lengths);
       trackSwing(state, standing, physics, pose, std::clamp(stateTime_ / 0.12, 0.0, 1.0));
     }
-    if (stateTime_ > 0.12 || footLoad(state, swing_) < 25.0) {
+    if (stateTime_ > 0.10 || footLoad(state, swing_) < 25.0) {
+      placeFoot(swing_);
       state_ = StepState::Swing;
       stateTime_ = 0;
       if (const BodyKinematics* foot = body(state, swing_ + "_foot")) swingStart_ = foot->position;
@@ -364,26 +386,16 @@ RecoveryReport RecoveryStep::update(const BodyState& state, StandingController& 
       ankle.z = kAnkleHeight;
       trackSwing(state, standing, physics, solveLeg(hip->position, ankle, forward, right, up_, spec.lengths), 1);
     }
-    if (footLoad(state, swing_) > 40.0 || stateTime_ > 0.16) {
+    if (footLoad(state, swing_) > 40.0 || stateTime_ > 0.12) {
+      adoptLanded();
       state_ = StepState::Settle;
       stateTime_ = 0;
+      standing.setSwingFoot("");
     }
     report.phase = 1;
   } else if (state_ == StepState::Settle) {
     stateTime_ += dt;
-    const double blend = 1.0 - 0.35 * std::clamp(stateTime_ / 0.45, 0.0, 1.0);
-    const BodyKinematics* hip = body(state, swing_ + "_upper_leg");
-    if (hip && blend > 0.02) {
-      const Side& spec = swing_ == "left" ? leftLeg_ : rightLeg_;
-      Vec3 ankle = ankleTarget_;
-      ankle.z = kAnkleHeight;
-      trackSwing(state, standing, physics, solveLeg(hip->position, ankle, forward, right, up_, spec.lengths), blend);
-    }
-    if (stateTime_ > 0.45) {
-      const char* names[5] = {"_hip_flex", "_hip_abd", "_knee", "_ankle_pitch", "_ankle_roll"};
-      for (const char* suffix : names) {
-        if (const JointState* hinge = joint(state, swing_ + suffix)) standing.shiftReference(hinge->name, hinge->angle);
-      }
+    if (stateTime_ > 0.35) {
       state_ = StepState::Idle;
       standing.setSwingFoot("");
       swing_.clear();

@@ -49,6 +49,7 @@ class StandingController {
   // Move one standing reference onto the pose the leg actually landed in,
   // so the pose spring does not yank the hip back to the pre-step crouch.
   void shiftReference(const std::string& jointName, double angle);
+  void noteAnkle(const std::string& jointName, double angle);
 
  private:
   struct Tune {

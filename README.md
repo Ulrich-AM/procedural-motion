@@ -4,6 +4,16 @@ Experimental fully procedural 3D humanoid motion. The long-term aim is walking, 
 
 **This project does not play animation.** The Y-Bot FBX is only a source of skeleton hierarchy and rest-pose proportions. No clips, keyframes, mocap, or pose playback are loaded into the simulator.
 
+## Phase 3 — Catch the step
+
+Phase 3 keeps the Phase 2 step and changes what happens around contact.
+
+When the swing starts, the landing is recomputed from the capture point at that moment, and the stance leg's standing targets are copied from the joints as they are. That stops the pre-step hip spring from pitching the torso while one foot is in the air. The swing is shorter, about 0.28 to 0.42 s.
+
+On a real foot load, the swing leg's current angles become the new standing references, including the ankle hold, and both feet go back to the balance torques. The planner does not keep tracking the swing curve after contact, and it still does not chain a second step by itself.
+
+A forward push of 80 N for 0.12 s lifts the foot and plants it while the pelvis is still about 0.75 m high. The body still falls after that contact. The catch is the timing of the plant, not yet a saved stand. An extreme push still falls.
+
 ## Phase 2 — One recovery step
 
 Phase 2 keeps the Phase 0 ragdoll and the Phase 1 stand. Recovery stepping is a separate switch.
@@ -53,7 +63,7 @@ Clearance is 8 cm. Duration is about 0.30 to 0.48 s depending on distance. State
 
 ### What a push does today
 
-A quiet stand with Recovery Step on does not step. A forward chest push of 110 N for 0.14 s, and a lateral push of 120 N for 0.14 s, each lift one foot about 10 cm and move it toward the computed landing. The body still falls afterward. An extreme push (400 N for 0.30 s) falls without a useful save. With Recovery Step off, 220 N for 0.20 s on the chest still knocks the stand over. The old 40 N toe-brace knockdown does not.
+A quiet stand with Recovery Step on does not step. With Recovery Step off, 220 N for 0.20 s on the chest still knocks the stand over. The old 40 N toe-brace knockdown does not. The Phase 3 section is the current push behavior.
 
 ## Phase 1 — Active standing
 
@@ -174,7 +184,7 @@ Physics check without a window:
 build\Release\procedural_motion.exe --self-test
 ```
 
-The self-test runs the Phase 0 passive fall first, then the active stand with recovery off. The stand must keep the pelvis upright for the last 4 seconds of a 10 second run, with both feet down and the center of mass near the support. A 220 N chest push for 0.20 s must still knock that stand over. Recovery is then turned on: three quiet seconds must not request a step, and the ankle pitch must stay off its range stop. A 110 N forward push and a 120 N lateral push must each lift one foot and move it toward the computed landing, using physical contact rather than a phase threshold. A 400 N push must still end in a fall. Root generalized force stays zero, and every hinge torque stays inside its limit.
+The self-test runs the Phase 0 passive fall first, then the active stand with recovery off. The stand must keep the pelvis upright for the last 4 seconds of a 10 second run, with both feet down and the center of mass near the support. A 220 N chest push for 0.20 s must still knock that stand over. Recovery is then turned on: three quiet seconds must not request a step, and the ankle pitch must stay off its range stop. An 80 N forward push must lift one foot, move it toward the computed landing, and plant while the pelvis is still above 0.65 m. A 140 N lateral push must lift a foot and plant while the pelvis is still that high. The sideways travel toward the target is still small. A 400 N push must still end in a fall. Root generalized force stays zero, and every hinge torque stays inside its limit.
 
 Or, after a build:
 
@@ -270,7 +280,7 @@ The measured source names and positions are written to `assets/generated/skeleto
 ## Limitations
 
 - Quiet standing on the flat sole is stable for the 10 second self-test, with ankles near 0.30 rad rather than the ±0.70 rad stop. It is still a narrow ankle strategy. The sole is only 18 cm long.
-- A recovery step does lift a foot, move it toward the capture-point target, and wait for real contact. In the pushes tried here (110 N forward, 120 N to the side, both for about 0.14 s) the body still falls after that step. The lateral step plants while the pelvis is still high, then the settle loses it. One step is not yet a reliable save.
+- A recovery step lifts a foot, moves it toward the capture-point target, and plants on a real contact. For an 80 N forward push the pelvis is still about 0.75 m high at that contact, then the stand after landing falls. One step is not yet a reliable save.
 - The planner will not chain steps. There is no walk cycle.
 - The leg IK matches knee flexion well and needs a measured hip bias because the crouched hip angle is not the geometric thigh-from-vertical angle. Swing tracking is torque PD, so the foot arrives late and short of a far target.
 - Joint limits are simple hinges, not anatomical joint surfaces. Ankle pitch is only ±40 degrees, which limits how far the stance shin can tilt while the sole stays flat.
@@ -283,4 +293,4 @@ The measured source names and positions are written to `assets/generated/skeleto
 
 ## Next phase
 
-Phase 3 should make this one step actually catch the center of mass, still without a gait cycle. The useful next work is a faster swing that reaches the landing while the pelvis is still high, and a settle that keeps the landed posture instead of falling after contact. Repeated stepping, turning, and rough terrain come after a single save is reliable.
+The open problem is the moment after contact. The foot can plant while the pelvis is still high, and the two-foot stand that follows still loses the center of mass. The next step is a settle that holds that landed support, still as one recovery step and still without a gait cycle. Repeated stepping, turning, and rough terrain come after a single save stays upright.
