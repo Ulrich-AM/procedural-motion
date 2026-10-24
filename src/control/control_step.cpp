@@ -4,9 +4,9 @@
 
 namespace pm {
 
-ControlOutput applyControl(const ControlInput& input, StandingController& standing, RecoveryStep& recovery,
-                           LocomotionController& locomotion, FootContactTracker& feet, JointServo& servo,
-                           PhysicalSkeleton& physics) {
+ControlOutput applyControl(const ControlInput& input, StandingController& standing, BalanceController& balance,
+                           RecoveryStep& recovery, LocomotionController& locomotion, FootContactTracker& feet,
+                           JointServo& servo, PhysicalSkeleton& physics) {
   const BodyState state = physics.sample();
   ControlOutput output;
   if (!input.active) {
@@ -49,6 +49,18 @@ ControlOutput applyControl(const ControlInput& input, StandingController& standi
     locomotion.reset();
     output.recovery = recovery.update(state, standing, frame, feet, input.dt, input.recovery);
   }
+  std::string focus = input.supportFocus;
+  std::string exclude = input.liftFoot;
+  if (input.walking) {
+    if (output.locomotion.stanceFoot == "left" || output.locomotion.stanceFoot == "right") focus = output.locomotion.stanceFoot;
+    if (output.locomotion.state == LocoState::LeftSwing || output.locomotion.state == LocoState::RightSwing) {
+      exclude = output.locomotion.swingFoot;
+    }
+  } else if (input.recovery &&
+             (output.recovery.state == StepState::Prepare || output.recovery.state == StepState::Swing)) {
+    exclude = output.recovery.swingFoot;
+  }
+  output.balance = balance.apply(state, frame, feet, physics, focus, exclude, input.liftFoot);
   output.peakTorque = servo.apply(frame, state, physics);
   standing.notePeak(output.peakTorque);
   output.standing.peakTorque = output.peakTorque;

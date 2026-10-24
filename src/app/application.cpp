@@ -169,6 +169,7 @@ bool Application::loadAssets(std::string& error) {
     return false;
   }
   controller_.capture(skeleton_, physics_.sample());
+  balance_.capture(skeleton_, physics_.sample());
   recoveryStep_.capture(skeleton_, physics_.sample());
   locomotion_.capture(skeleton_, physics_.sample());
   return true;
@@ -267,7 +268,7 @@ void Application::drawUi(const BodyState& state) {
                                  ImGuiWindowFlags_NoCollapse;
   ImGui::Begin("lab", nullptr, flags);
   ImGui::TextUnformatted("PROCEDURAL MOTION LAB");
-  ImGui::TextUnformatted("Phase: 4 - Support Transfer");
+  ImGui::TextUnformatted("Phase: 5 - Balance Foundation");
   ImGui::Text("Simulation: %s", paused_ ? "Paused" : "Running");
   ImGui::Text("Time: %.2f s", state.time);
   ImGui::Separator();
@@ -358,6 +359,11 @@ void Application::drawUi(const BodyState& state) {
               100.0 * locoReport_.rightFraction);
   ImGui::Text("Support Transfer: %s", walking_ ? locoReport_.transfer.c_str() : "Quiet");
   ImGui::Text("COM Height: %.3f", state.centerOfMass.z);
+  ImGui::Text("Pelvis/Foot Offset: %.3f m", balanceReport_.pelvisFootOffset);
+  ImGui::Text("Hip Flex Torque L/R: %.1f  %.1f Nm", physics_.appliedJointTorque("left_hip_flex"),
+              physics_.appliedJointTorque("right_hip_flex"));
+  ImGui::Text("Ankle Pitch Torque L/R: %.1f  %.1f Nm", physics_.appliedJointTorque("left_ankle_pitch"),
+              physics_.appliedJointTorque("right_ankle_pitch"));
   ImGui::Text("Left Foot Contact State: %s", footContactLabel(contacts_.left().mode));
   ImGui::Text("Right Foot Contact State: %s", footContactLabel(contacts_.right().mode));
   ImGui::Text("Peak Controller Torque: %.1f Nm", active_ ? report_.peakTorque : 0.0);
@@ -383,6 +389,8 @@ void Application::drawFrame() {
   frame.support = showWalk ? locoReport_.support : report_.supportCenter;
   frame.drawStance = showWalk && locoReport_.stanceSoleValid;
   frame.stance = locoReport_.stanceSole;
+  frame.drawCop = active_ && balanceReport_.copValid;
+  frame.cop = balanceReport_.cop;
   frame.drawCapture = showWalk || showRecovery;
   frame.capture = showWalk ? locoReport_.capture : recoveryReport_.capture;
   frame.drawLanding = showWalk ? locoReport_.landingValid : (showRecovery && recoveryReport_.landingValid);
@@ -492,8 +500,9 @@ void Application::stepPhysics() {
   input.walking = walking_;
   input.desired = desiredVelocity_;
   input.dt = physics_.timestep() > 0 ? physics_.timestep() : config_.timestep;
-  const ControlOutput output = applyControl(input, controller_, recoveryStep_, locomotion_, contacts_, servo_, physics_);
+  const ControlOutput output = applyControl(input, controller_, balance_, recoveryStep_, locomotion_, contacts_, servo_, physics_);
   report_ = output.standing;
+  balanceReport_ = output.balance;
   recoveryReport_ = output.recovery;
   locoReport_ = output.locomotion;
   report_.peakTorque = output.peakTorque;
@@ -532,6 +541,7 @@ void Application::requestPush(int direction) {
 void Application::resetSimulation() {
   physics_.reset();
   controller_.capture(skeleton_, physics_.sample());
+  balance_.capture(skeleton_, physics_.sample());
   recoveryStep_.capture(skeleton_, physics_.sample());
   locomotion_.capture(skeleton_, physics_.sample());
   contacts_.reset();

@@ -214,6 +214,10 @@ void Viewer::render(mjData* data, const RenderFrame& frame) {
     const float stanceColor[4] = {0.95f, 0.55f, 0.15f, 1.0f};
     addSphere(Vec3{frame.stance.x, frame.stance.y, 0.03}, 0.035, stanceColor);
   }
+  if (frame.drawCop) {
+    const float copColor[4] = {0.15f, 0.45f, 0.85f, 1.0f};
+    addSphere(Vec3{frame.cop.x, frame.cop.y, 0.02}, 0.025, copColor);
+  }
   if (frame.drawCapture) {
     const float capture[4] = {0.15f, 0.15f, 0.15f, 1.f};
     addCross(frame.capture, capture);

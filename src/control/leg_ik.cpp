@@ -19,7 +19,7 @@ LegPose solveLeg(Vec3 hip, Vec3 ankleTarget, Vec3 forward, Vec3 right, Vec3 up, 
   Vec3 delta = ankleTarget - hip;
   double distance = length(delta);
   const double minReach = std::abs(thigh - shin) + 0.02;
-  const double maxReach = thigh + shin - 0.02;
+  const double maxReach = thigh + shin - 0.001;
   if (distance < 1e-4) return pose;
   pose.reachable = distance <= maxReach + 1e-3 && distance >= minReach - 1e-3;
   distance = std::clamp(distance, minReach, maxReach);

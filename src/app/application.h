@@ -67,6 +67,8 @@ class Application {
   float pushForce_ = 90.f;
   Vec3 desiredVelocity_{};
   StandingController controller_;
+  BalanceController balance_;
+  BalanceReport balanceReport_;
   StandingReport report_;
   RecoveryStep recoveryStep_;
   RecoveryReport recoveryReport_;

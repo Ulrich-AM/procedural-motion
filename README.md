@@ -4,6 +4,18 @@ Experimental fully procedural 3D humanoid motion. The long-term aim is walking, 
 
 **This project does not play animation.** The Y-Bot FBX is only a source of skeleton hierarchy and rest-pose proportions. No clips, keyframes, mocap, or pose playback are loaded into the simulator.
 
+## Phase 5 — Balance foundation
+
+Phase 5 does not retune the walk. Phase 4's load transfer worked, and the body still fell, because the quiet stand was a bad equilibrium. The feet settled about 13 cm behind the pelvis. One hip then had to hold about `75 kg * 9.81 * 0.13 m`, near 95 Nm, against a 100 Nm flexion limit. Two hips could share that moment. One hip could not, so unloading a foot folded the stance hip. The imported Y-Bot rest pose does not have this offset: the pelvis is at y = 0 and each foot is at about y = 0.026, roughly 2.6 cm, not 13 cm. The offset is produced by the controller.
+
+The standing reference is rebuilt from the skeleton instead of `hipTarget = -0.06` and `ankleTarget = -(hip + knee)`. `solveLeg` places each ankle under its hip with a 10 degree knee bend. On this skeleton that is hip flexion -0.070 rad, knee -0.175 rad, ankle pitch 0.244 rad, hip-to-ankle span 0.824 m. Nothing is played back. Posture PD is only a regularizer. `BalanceController` owns the support objective: capture point of the whole-body COM relative to `SupportState`, ankle torque clamped to `foot load * 0.09 m` (the sole half-length), and a hip assist clamped to 10 Nm so the hip law itself cannot live on the 100 Nm limit. The hip flexion limit is unchanged.
+
+`mj_jacBody` on the stance foot is wired, and any generalized force on the six free-root DOFs is discarded. That virtual force is currently held at zero. Mapping it through the hip folds the floating pelvis: the same positive hip torque that stops a fast flexion also throws the pelvis backward off the soles. The capture-point ankle law is what actually commands sagittal torque.
+
+The 10 second stand does not pass. With the geometric reference, at 0.5 s the pelvis is at 0.945 m, up axis 0.998, and the pelvis/foot sagittal offset is already 0.161 m, with 16 Nm at the hip. By 2.5 s the offset is 0.384 m and the body is still upright. By 3.5 s it is on the ground (pelvis z 0.073, up axis 0.131). The 6–10 s window is that fallen pose: mean offset 0.887 m, mean hip torque 15 Nm, ankle torque sitting on the 70 Nm clamp, upright ratio 0, both feet 0/480. Root generalized force stayed 0. A bind-pose experiment reached an offset near 0 at about 2 s with the pelvis still at 0.96 m, then fell backward; that live hip-target follow is not kept, because it is the same settled-angle trap as Phase 4 and it still fell.
+
+Weight shift, single-leg stance, the single-support push, and the one-step check do not run. The self-test stops at the stand. Phase 5 is not complete.
+
 ## Phase 4 — Support transfer
 
 Phase 4 does not play a walk cycle. Support is computed from the planted soles, not from the pelvis. `SupportState` records each foot, the support center, the sole bounds, and the left/right load fraction. Locomotion and recovery both use it. The gait states are Standing, Transfer, LeftSwing, RightSwing, Landing, Stopping, and Fallen.
@@ -329,9 +341,9 @@ The measured source names and positions are written to `assets/generated/skeleto
 
 ## Limitations
 
-- Quiet standing on the flat sole is stable for the 10 second self-test, with ankles near 0.30 rad rather than the ±0.70 rad stop. It is still a narrow ankle strategy. The sole is only 18 cm long.
+- The 10 second quiet stand does not currently pass. The geometric reference is hip -0.070 rad, knee -0.175 rad, ankle 0.244 rad, but the pelvis still runs forward of the feet and the body is down by about 3.5 s. See Phase 5. The sole is only 18 cm long, so once the offset is past about 9 cm the ankles cannot hold the moment.
 - A recovery step lifts a foot, moves it toward the capture-point target, and plants on a real contact. For an 80 N forward push the pelvis is still about 0.80 m high at that contact, then the stand after landing falls. Up to three capture steps are allowed. They do not yet save that push.
-- Walking transfers load onto the stance foot, then the stance hip folds and the pelvis drops. One hip at the 100 Nm limit cannot hold the quiet-stand lean once the other foot is unloaded. See Phase 4. The one-step self-test fails on this, and the longer walk checks do not run.
+- Single support and the one-step walk are not reached. The self-test fails on the quiet stand before those checks. Phase 4's one-step failure is still the underlying problem: one hip cannot hold a pelvis that is not over the stance sole.
 - The leg IK matches knee flexion well and needs a measured hip bias because the crouched hip angle is not the geometric thigh-from-vertical angle. Swing tracking is torque PD, so the foot arrives late and short of a far target.
 - Joint limits are simple hinges, not anatomical joint surfaces. Ankle pitch is only ±40 degrees, which limits how far the stance shin can tilt while the sole stays flat.
 - Clavicles are not rigid bodies.
@@ -343,4 +355,4 @@ The measured source names and positions are written to `assets/generated/skeleto
 
 ## Next phase
 
-Do not add running, turning, or terrain yet. Phase 4 did not produce a step that stays upright. The next change has to move the pelvis back over the ankles, or lengthen the moment arm the hip can hold, without disturbing the two-foot stand that is already sitting on the 100 Nm hip clamp. Until one unloaded hip can hold that posture, more gait states will not make a sustained walk.
+Do not start Phase 6, and do not retune step timing. The geometric stand is in place and the 10 second test fails on it. The next change has to keep the pelvis over the soles without a hip torque that either folds the torso or throws it backward. Until that two-foot stand holds with the hip well under 100 Nm, a weight shift and a one-leg stand will not be meaningful, and a walk will not be either.

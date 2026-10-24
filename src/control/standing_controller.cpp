@@ -1,5 +1,7 @@
 #include "control/standing_controller.h"
 
+#include "control/foot_placement.h"
+#include "control/swing_command.h"
 #include "physics/physical_skeleton.h"
 
 #include <algorithm>
@@ -11,25 +13,10 @@ namespace pm {
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
-constexpr double kKneeBend = 10.0 * kPi / 180.0;
-constexpr double kGravity = 9.81;
-
-// Ankle/hip feedback gains. These scale the gravity moment m*g*capture, then
-// the joint torque limit clamps the result. They are not stiff pose springs.
-// Capture is a COM-meter gain on m*g. Both ankles share it, so the total moment
-// is k * m * g * capture. The pose springs add a little more. Rate damping stays
-// modest so a landing spike cannot spend the whole ankle torque budget.
-constexpr double kAnkleCapture = 0.8;
-constexpr double kAnkleLateral = 2.4;
-constexpr double kAnkleLean = 8.0;
-constexpr double kAnkleRate = 4.0;
-constexpr double kAnkleLatRate = 4.0;
-constexpr double kHipCapture = 0.04;
-constexpr double kHipLean = 12.0;
-constexpr double kHipFilter = 0.28;
-constexpr double kSpineLean = 22.0;
-constexpr double kSpineRate = 6.0;
-constexpr double kNeckLean = 6.0;
+// Pose springs only keep the body recognizable. Balance force holds the COM.
+constexpr double kSpineLean = 4.0;
+constexpr double kSpineRate = 2.0;
+constexpr double kNeckLean = 2.0;
 
 struct Indexed {
   std::unordered_map<std::string, const JointState*> joints;
@@ -67,14 +54,6 @@ bool footFloorContact(const ContactState& contact, const char* footToken) {
   return foot && floor && contact.position.z < 0.12 && contact.normalForce > 1.0;
 }
 
-// Flexion is whichever side of the limit is larger. A straight reset pose is 0.
-double flexionSign(const JointState& joint) {
-  if (!(joint.rangeMin < joint.rangeMax)) return 0;
-  if (std::abs(joint.rangeMin) > std::abs(joint.rangeMax) + 1e-4) return joint.rangeMin < 0 ? -1.0 : 1.0;
-  if (std::abs(joint.rangeMax) > std::abs(joint.rangeMin) + 1e-4) return joint.rangeMax > 0 ? 1.0 : -1.0;
-  return 0;
-}
-
 double clampToRange(const JointState& joint, double target) {
   if (!(joint.rangeMin < joint.rangeMax)) return target;
   const double margin = 0.03;
@@ -98,12 +77,12 @@ const char* balanceLabel(BalanceStatus status) {
 
 StandingController::Tune StandingController::tuneFor(const std::string& jointName) const {
   // Legs carry the body. Arms only hold the imported T-pose.
-  if (jointName.find("ankle") != std::string::npos) return {80.0, 8.0, 70.0};
-  if (jointName.find("hip_abd") != std::string::npos) return {650.0, 50.0, 120.0};
-  if (jointName.find("hip_flex") != std::string::npos) return {300.0, 24.0, 100.0};
-  if (jointName.find("hip") != std::string::npos) return {80.0, 8.0, 30.0};
-  if (jointName.find("knee") != std::string::npos) return {420.0, 36.0, 110.0};
-  if (jointName.find("spine") != std::string::npos) return {80.0, 8.0, 40.0};
+  if (jointName.find("ankle") != std::string::npos) return {70.0, 8.0, 70.0};
+  if (jointName.find("hip_abd") != std::string::npos) return {220.0, 18.0, 120.0};
+  if (jointName.find("hip_flex") != std::string::npos) return {200.0, 16.0, 100.0};
+  if (jointName.find("hip") != std::string::npos) return {50.0, 5.0, 30.0};
+  if (jointName.find("knee") != std::string::npos) return {400.0, 30.0, 110.0};
+  if (jointName.find("spine") != std::string::npos) return {40.0, 6.0, 40.0};
   if (jointName.find("neck") != std::string::npos) return {20.0, 2.0, 12.0};
   if (jointName.find("shoulder") != std::string::npos) return {55.0, 6.0, 28.0};
   if (jointName.find("elbow") != std::string::npos) return {24.0, 2.2, 14.0};
@@ -169,25 +148,50 @@ void StandingController::capture(const SkeletonDefinition& skeleton, const BodyS
     targets_[joint.name] = joint.angle;
   }
 
+  Vec3 forward = restForward_;
+  Vec3 right = restRight_;
+  Vec3 up = restUp_;
+  forward.z = 0;
+  right.z = 0;
+  forward = normalize(forward);
+  right = normalize(right);
+  if (length(forward) < 0.5) forward = {0, -1, 0};
+  if (length(right) < 0.5) right = {-1, 0, 0};
   for (const char* side : {"left", "right"}) {
-    const std::string kneeName = std::string(side) + "_knee";
-    const std::string ankleName = std::string(side) + "_ankle_pitch";
-    const JointState* knee = findJoint(indexed, kneeName);
-    const JointState* ankle = findJoint(indexed, ankleName);
-    if (!knee) continue;
-    const double sign = flexionSign(*knee);
-    const double kneeTarget = clampToRange(*knee, sign * kKneeBend);
-    targets_[kneeName] = kneeTarget;
-    const std::string hipName = std::string(side) + "_hip_flex";
-    const JointState* hip = findJoint(indexed, hipName);
-    // A near-straight leg keeps the flat sole under the pelvis. The ankle
-    // cancels the remaining knee bend so the sole does not rock onto a corner.
-    const double hipTarget = -0.06;
-    if (hip) targets_[hipName] = clampToRange(*hip, hipTarget);
-    if (ankle) targets_[ankleName] = clampToRange(*ankle, -(hipTarget + kneeTarget));
-    std::cout << "Standing reference: " << kneeName << " " << targets_[kneeName] << " rad, " << hipName << " "
-              << (hip ? targets_[hipName] : 0) << " rad, " << ankleName << " " << (ankle ? targets_[ankleName] : 0)
-              << " rad (flexion sign " << sign << ")\n";
+    const BodyKinematics* hipBody = findBody(state, std::string(side) + "_upper_leg");
+    const BodyKinematics* kneeBody = findBody(state, std::string(side) + "_lower_leg");
+    const BodyKinematics* footBody = findBody(state, std::string(side) + "_foot");
+    const JointState* knee = findJoint(indexed, std::string(side) + "_knee");
+    const JointState* hip = findJoint(indexed, std::string(side) + "_hip_flex");
+    if (!hipBody || !kneeBody || !footBody || !knee || !hip) continue;
+    LegLengths lengths;
+    lengths.thigh = std::max(0.2, length(kneeBody->position - hipBody->position));
+    lengths.shin = std::max(0.2, length(footBody->position - kneeBody->position));
+    lengths.kneeSign = std::abs(knee->rangeMin) >= std::abs(knee->rangeMax) ? -1.0 : 1.0;
+    calibrateHipBias(lengths, state, side, hipBody->position, footBody->position, forward, right, up);
+    // Slight knee flexion with the ankle directly under the hip. The bind pose
+    // is already nearly stacked; this does not copy the settled 13 cm offset.
+    const double bend = 10.0 * kPi / 180.0;
+    const double span = std::sqrt(lengths.thigh * lengths.thigh + lengths.shin * lengths.shin +
+                                   2.0 * lengths.thigh * lengths.shin * std::cos(bend));
+    Vec3 ankle = hipBody->position;
+    ankle.z = hipBody->position.z - span;
+    const LegPose pose = solveLeg(hipBody->position, ankle, forward, right, up, lengths);
+    auto set = [&](const std::string& name, double angle) {
+      if (const JointState* hinge = findJoint(indexed, name)) targets_[name] = clampToRange(*hinge, angle);
+    };
+    const bool holdBind = false;
+    if (!holdBind) {
+      set(std::string(side) + "_hip_flex", pose.hipFlex);
+      set(std::string(side) + "_hip_abd", pose.hipAbd);
+      set(std::string(side) + "_knee", pose.knee);
+      set(std::string(side) + "_ankle_pitch", pose.anklePitch);
+      set(std::string(side) + "_ankle_roll", pose.ankleRoll);
+    }
+    std::cout << "Standing reference: " << side << "_knee " << targets_[std::string(side) + "_knee"] << " rad, "
+              << side << "_hip_flex " << targets_[std::string(side) + "_hip_flex"] << " rad, " << side
+              << "_ankle_pitch " << targets_[std::string(side) + "_ankle_pitch"] << " rad (stacked span " << span
+              << " m)\n";
   }
   home_ = targets_;
 }
@@ -307,122 +311,45 @@ StandingReport StandingController::update(const BodyState& state, ControlFrame& 
   if (chest) chestUp = rotateByBody(*chest, restUp_);
   if (head) headUp = rotateByBody(*head, restUp_);
 
-  const double sagErr = directional ? dot(report.supportCenter - state.centerOfMass, forward) : 0;
-  const double latErr = directional ? dot(report.supportCenter - state.centerOfMass, right) : 0;
-  const double sagVel = directional ? dot(state.centerOfMassVelocity, forward) : 0;
-  const double latVel = directional ? dot(state.centerOfMassVelocity, right) : 0;
-  const double sagLean = directional ? dot(pelvisUp, forward) : 0;
-  const double latLean = directional ? dot(pelvisUp, right) : 0;
   const double chestSag = directional ? dot(chestUp, forward) : 0;
   const double chestLat = directional ? dot(chestUp, right) : 0;
   const double headSag = directional ? dot(headUp, forward) : 0;
   const double headLat = directional ? dot(headUp, right) : 0;
-  // d/dt of forward lean is -dot(angularVelocity, right) when right/forward/up are orthonormal.
   const double sagRate = directional ? -dot(angular, right) : 0;
   const double latRate = directional ? dot(angular, forward) : 0;
+  const bool supported = report.supportValid && directional && (report.leftFootContact || report.rightFootContact);
 
   const double dt = lastTime_ >= 0 ? std::clamp(state.time - lastTime_, 0.0, 0.05) : 1.0 / 120.0;
   lastTime_ = state.time;
   relaxReferences(dt);
-  const double blend = 1.0 - std::exp(-dt / kHipFilter);
-  const bool supported = report.supportValid && directional && (report.leftFootContact || report.rightFootContact);
-  const double height = pelvis ? std::clamp(pelvis->position.z, 0.45, 1.15) : 0.9;
-  const double omega = std::sqrt(kGravity / height);
-  const double sagCapture = sagittalScale_ * (sagErr - sagVel / omega);
-  const double latCapture = lateralScale_ * (latErr - latVel / omega);
-  if (supported) {
-    hipSagittal_ += (sagCapture - hipSagittal_) * blend;
-    hipLateral_ += (latCapture - hipLateral_) * blend;
-  } else {
-    hipSagittal_ *= 1.0 - blend;
-    hipLateral_ *= 1.0 - blend;
-  }
-
-  const int feet = (report.leftFootContact ? 1 : 0) + (report.rightFootContact ? 1 : 0);
-  // A designated swing leg is not a support. The stance ankle carries the whole term.
-  const double share = !swingFoot_.empty() ? 1.0 : (feet > 0 ? 1.0 / static_cast<double>(feet) : 0);
-  const double weight = std::max(1.0, state.mass) * kGravity;
-  double footLoad = 0;
-  for (const ContactState& contact : state.contacts) {
-    if (footFloorContact(contact, "left_foot") || footFloorContact(contact, "right_foot")) {
-      footLoad += std::max(0.0, contact.normalForce);
-    }
-  }
-  const double impactScale = footLoad > 1.8 * weight ? 0.35 : 1.0;
 
   for (const JointState& joint : state.joints) {
     if (joint.type != "hinge") continue;
     const Tune tune = tuneFor(joint.name);
     double target = targetFor(joint.name, joint.angle);
-    // The flat sole settles a little more dorsiflexed than the landing reference.
-    // Keep the spring on that settled angle so it does not cancel the capture torque.
-    if (joint.name.find("ankle_pitch") != std::string::npos) {
-      double& hold = joint.name.rfind("left_", 0) == 0 ? ankleHoldLeft_ : ankleHoldRight_;
-      if (state.time > 1.2 && state.time < 2.0 && std::abs(joint.velocity) < 1.2) {
-        const double follow = 1.0 - std::exp(-dt / 0.30);
-        hold += (std::clamp(joint.angle, 0.05, 0.42) - hold) * follow;
-      }
-      if (state.time > 1.5) {
-        const double blend = std::clamp((state.time - 1.5) / 0.5, 0.0, 1.0);
-        target = (1.0 - blend) * target + blend * hold;
-      }
-    }
-    double torque = tune.kp * (target - joint.angle) - tune.kd * joint.velocity;
-
-    const bool left = joint.name.rfind("left_", 0) == 0;
-    const bool right = joint.name.rfind("right_", 0) == 0;
     const bool swinging = (!swingFoot_.empty() && joint.name.rfind(swingFoot_ + "_", 0) == 0);
-    const bool stanceKnee = joint.name.find("knee") != std::string::npos && !swinging &&
-                            (stanceFocus_.empty() || joint.name.rfind(stanceFocus_ + "_", 0) == 0);
-    if (stanceKnee && (kneeExtra_ > 0 || heightAssist_)) {
-      if (kneeExtra_ > 0) target -= kneeExtra_;
-      if (heightAssist_ && pelvis) {
-        const double heightError = pelvis->position.z - 0.90;
-        if (heightError < -0.06) target += std::min(0.08, -heightError * 0.25);
-        else if (heightError > 0.06) target -= 0.03;
-      }
+    if (!swinging && joint.name.find("knee") != std::string::npos && kneeExtra_ > 0 &&
+        (stanceFocus_.empty() || joint.name.rfind(stanceFocus_ + "_", 0) == 0)) {
+      target -= kneeExtra_;
     }
-    if (heightAssist_ && !swinging && joint.name.find("hip_flex") != std::string::npos && pelvisLean_ != 0) {
-      target -= pelvisLean_;
-    }
-    const bool footDown = (left && report.leftFootContact) || (right && report.rightFootContact);
-    if (supported && footDown && share > 0 && !swinging) {
-      if (joint.name.find("ankle_pitch") != std::string::npos) {
-        // Positive pitch is dorsiflexion and, with the foot planted, tips the body forward.
-        torque += share * (kAnkleCapture * weight * sagCapture - kAnkleLean * sagLean - kAnkleRate * sagRate);
-      } else if (joint.name.find("ankle_roll") != std::string::npos) {
-        // Positive roll tips the body toward character-left, so the sign is opposite the rightward error.
-        torque += share * (-kAnkleLateral * 0.25 * weight * latCapture - kAnkleLean * latLean - kAnkleLatRate * latRate);
-      } else if (hipBalance_ && joint.name.find("hip_flex") != std::string::npos) {
-        // Positive hip flexion tips the torso backward when the feet stay down.
-        torque += impactScale * share * (-kHipCapture * weight * hipSagittal_ + kHipLean * sagLean + 5.0 * sagRate);
-      } else if (hipBalance_ && joint.name.find("hip_abd") != std::string::npos) {
-        torque += impactScale * share * (kHipCapture * weight * hipLateral_ + kHipLean * latLean + 5.0 * latRate);
-      }
-    }
+    if (!swinging && pelvisLean_ != 0 && joint.name.find("hip_flex") != std::string::npos) target -= pelvisLean_;
+    double feedforward = 0;
+    // A light torso regularizer. It does not hold the COM.
     if (supported && joint.name.find("spine") != std::string::npos) {
-      if (joint.name.find("_flex") != std::string::npos) {
-        torque += kSpineLean * chestSag + kSpineRate * sagRate;
-        if (heightAssist_) torque += 8.0 * pelvisLean_;
-      } else if (joint.name.find("_abd") != std::string::npos) {
-        torque += -kSpineLean * chestLat - kSpineRate * latRate;
-      }
+      if (joint.name.find("_flex") != std::string::npos) feedforward = kSpineLean * chestSag + kSpineRate * sagRate;
+      else if (joint.name.find("_abd") != std::string::npos) feedforward = -kSpineLean * chestLat - kSpineRate * latRate;
     }
     if (supported && joint.name.find("neck") != std::string::npos) {
-      if (joint.name.find("_flex") != std::string::npos) torque += kNeckLean * headSag;
-      if (joint.name.find("_abd") != std::string::npos) torque += -kNeckLean * headLat;
+      if (joint.name.find("_flex") != std::string::npos) feedforward = kNeckLean * headSag;
+      if (joint.name.find("_abd") != std::string::npos) feedforward = -kNeckLean * headLat;
     }
-
-    if (!std::isfinite(torque)) torque = 0;
+    if (!std::isfinite(feedforward)) feedforward = 0;
     JointCommand command;
     command.target = target;
     command.kp = tune.kp;
     command.kd = tune.kd;
     command.limit = tune.limit;
-    // Pose PD is applied by the servo from target/kp/kd. The balance term is
-    // feedforward so a swing blend can fade it without a second torque write.
-    command.feedforward = torque - (tune.kp * (target - joint.angle) - tune.kd * joint.velocity);
-    if (!std::isfinite(command.feedforward)) command.feedforward = 0;
+    command.feedforward = feedforward;
     frame.setStance(joint.name, command);
   }
 

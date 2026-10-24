@@ -102,10 +102,12 @@ int runProceduralSelfTest(PhysicalSkeleton& physics, StandingController& standin
     double upZ = 0;
     return upright(state, pelvisZ, upZ) && pelvisZ > 0.70 && upZ > 0.85;
   };
+  BalanceController balance;
   auto boot = [&]() {
     physics.reset();
     const BodyState state = physics.sample();
     standing.capture(skeleton, state);
+    balance.capture(skeleton, state);
     recovery.capture(skeleton, state);
     locomotion.capture(skeleton, state);
     feet.reset();
@@ -219,14 +221,16 @@ int runProceduralSelfTest(PhysicalSkeleton& physics, StandingController& standin
   if (physics.lastRootAppliedForce() > 1e-8) return fail("root received generalized force");
 
   const double dt = model->opt.timestep;
-  auto drive = [&](bool recoveryOn, bool walkingOn, Vec3 desired) {
+  auto drive = [&](bool recoveryOn, bool walkingOn, Vec3 desired, const std::string& focus = {}, const std::string& lift = {}) {
     ControlInput input;
     input.active = true;
     input.recovery = recoveryOn;
     input.walking = walkingOn;
     input.desired = desired;
+    input.supportFocus = focus;
+    input.liftFoot = lift;
     input.dt = dt;
-    const ControlOutput output = applyControl(input, standing, recovery, locomotion, feet, servo, physics);
+    const ControlOutput output = applyControl(input, standing, balance, recovery, locomotion, feet, servo, physics);
     physics.step();
     const bool ok = finiteArray(data->qpos, model->nq) && finiteArray(data->qvel, model->nv) &&
                     physics.lastRootAppliedForce() <= 1e-8 && physics.lastPeakJointTorque() <= 120.01;
@@ -239,11 +243,40 @@ int runProceduralSelfTest(PhysicalSkeleton& physics, StandingController& standin
   int uprightCount = 0;
   int leftCount = 0;
   int rightCount = 0;
+  int hipSaturated = 0;
   double errorSum = 0;
+  double hipSum = 0;
+  double ankleSum = 0;
+  double offsetSum = 0;
+  double minPelvis = 10;
+  double minUp = 1;
+  double maxHip = 0;
+  double maxAnkle = 0;
   for (int step = 1; step <= standSteps; ++step) {
     const auto driven = drive(false, false, {});
     if (!driven.first) return fail("controlled step wrote root force, exceeded a torque limit, or went non-finite");
     if (model->nu != 0) return fail("controller added actuators");
+    if (step % 60 == 0 && data->time < 4.0) {
+      const BodyState early = physics.sample();
+      double earlyZ = 0;
+      double earlyUp = 0;
+      upright(early, earlyZ, earlyUp);
+      const JointState* hip = nullptr;
+      const JointState* knee = nullptr;
+      const JointState* ankle = nullptr;
+      for (const JointState& joint : early.joints) {
+        if (joint.name == "left_hip_flex") hip = &joint;
+        if (joint.name == "left_knee") knee = &joint;
+        if (joint.name == "left_ankle_pitch") ankle = &joint;
+      }
+      const BodyKinematics* foot = bodyOf(early, "left_foot");
+      const BodyKinematics* pelvis = bodyOf(early, "pelvis");
+      std::cout << "  stand t " << data->time << " z " << earlyZ << " up " << earlyUp << " offset "
+                << driven.second.balance.pelvisFootOffset << " hipT " << physics.appliedJointTorque("left_hip_flex")
+                << " ang " << (hip ? hip->angle : 0) << " knee " << (knee ? knee->angle : 0) << " ankle "
+                << (ankle ? ankle->angle : 0) << " footY " << (foot ? foot->position.y : 0) << " pelY "
+                << (pelvis ? pelvis->position.y : 0) << "\n";
+    }
     if (data->time < 6.0) continue;
     const BodyState sample = physics.sample();
     double pelvisZ = 0;
@@ -255,15 +288,42 @@ int runProceduralSelfTest(PhysicalSkeleton& physics, StandingController& standin
     if (report.leftFootContact) ++leftCount;
     if (report.rightFootContact) ++rightCount;
     if (report.supportValid) errorSum += std::hypot(report.comErrorX, report.comErrorY);
+    const double hip = 0.5 * (std::abs(physics.appliedJointTorque("left_hip_flex")) +
+                               std::abs(physics.appliedJointTorque("right_hip_flex")));
+    const double ankle = 0.5 * (std::abs(physics.appliedJointTorque("left_ankle_pitch")) +
+                                 std::abs(physics.appliedJointTorque("right_ankle_pitch")));
+    hipSum += hip;
+    ankleSum += ankle;
+    offsetSum += std::abs(driven.second.balance.pelvisFootOffset);
+    minPelvis = std::min(minPelvis, pelvisZ);
+    minUp = std::min(minUp, upZ);
+    maxHip = std::max(maxHip, std::max(std::abs(physics.appliedJointTorque("left_hip_flex")),
+                                       std::abs(physics.appliedJointTorque("right_hip_flex"))));
+    maxAnkle = std::max(maxAnkle, std::max(std::abs(physics.appliedJointTorque("left_ankle_pitch")),
+                                           std::abs(physics.appliedJointTorque("right_ankle_pitch"))));
+    if (std::abs(physics.appliedJointTorque("left_hip_flex")) > 95.0 ||
+        std::abs(physics.appliedJointTorque("right_hip_flex")) > 95.0) {
+      ++hipSaturated;
+    }
   }
   if (window < 10) return fail("standing window was empty");
   const double uprightRatio = static_cast<double>(uprightCount) / static_cast<double>(window);
   const double meanError = errorSum / static_cast<double>(window);
+  const double meanHip = hipSum / static_cast<double>(window);
+  const double meanAnkle = ankleSum / static_cast<double>(window);
+  const double meanOffset = offsetSum / static_cast<double>(window);
   std::cout << "Stand window upright " << uprightRatio << ", mean COM error " << meanError << " m, foot samples "
             << leftCount << "/" << rightCount << " of " << window << "\n";
+  std::cout << "Neutral pelvis/foot offset " << meanOffset << " m, quiet hip " << meanHip << " Nm (peak " << maxHip
+            << "), quiet ankle " << meanAnkle << " Nm (peak " << maxAnkle << "), hip saturated samples " << hipSaturated
+            << ", min pelvis z " << minPelvis << ", min up " << minUp << "\n";
   if (uprightRatio < 0.9) return fail("humanoid did not stay upright for the last 4 seconds");
   if (leftCount < window / 2 || rightCount < window / 2) return fail("feet were not on the floor");
   if (meanError > 0.12) return fail("COM stayed far from the support center");
+  if (meanOffset > 0.06) return fail("feet settled far behind the pelvis");
+  if (meanHip > 55.0 || maxHip > 90.0 || hipSaturated > window / 20) {
+    return fail("quiet stand still depends on a hip near its torque clamp");
+  }
 
   const BodyState beforePush = physics.sample();
   const BodyKinematics* pelvisBefore = bodyOf(beforePush, "pelvis");
@@ -493,6 +553,165 @@ int runProceduralSelfTest(PhysicalSkeleton& physics, StandingController& standin
   const std::string fallResult = trial(forward, 400.0, 0.30, false, 0.0);
   if (!fallResult.empty()) return fail("extreme push: " + fallResult);
   std::cout << "RECOVERY CHECKS PASSED\n";
+
+  auto quiet = [&](double seconds) {
+    const int steps = std::max(1, static_cast<int>(std::lround(seconds / dt)));
+    for (int step = 0; step < steps; ++step) {
+      if (!drive(false, false, {}).first) return false;
+    }
+    return true;
+  };
+  auto weightShift = [&](const std::string& focus) {
+    if (!quiet(3.0)) return fail(focus + " shift could not settle");
+    double fractionSum = 0;
+    double hipSum = 0;
+    double maxHip = 0;
+    double minZ = 10;
+    double minUp = 1;
+    double errorSum = 0;
+    int samples = 0;
+    const int steps = std::max(1, static_cast<int>(std::lround(3.0 / dt)));
+    for (int step = 0; step < steps; ++step) {
+      const auto driven = drive(false, false, {}, focus, "");
+      if (!driven.first) return fail(focus + " weight shift wrote root force or saturated a joint");
+      if (step * dt < 2.0) continue;
+      const BodyState sample = physics.sample();
+      const double left = footLoad(sample, "left");
+      const double right = footLoad(sample, "right");
+      const double total = left + right;
+      if (total < 40.0) return fail(focus + " weight shift lost floor contact");
+      const double fraction = (focus == "left" ? left : right) / total;
+      const double hip = std::abs(physics.appliedJointTorque(focus + "_hip_flex"));
+      double pelvisZ = 0;
+      double upZ = 0;
+      upright(sample, pelvisZ, upZ);
+      fractionSum += fraction;
+      hipSum += hip;
+      maxHip = std::max(maxHip, hip);
+      minZ = std::min(minZ, pelvisZ);
+      minUp = std::min(minUp, upZ);
+      const StandingReport report = standing.diagnose(sample);
+      if (report.supportValid) errorSum += std::hypot(report.comErrorX, report.comErrorY);
+      ++samples;
+    }
+    if (samples < 10) return fail(focus + " weight shift window was empty");
+    const double fraction = fractionSum / samples;
+    const double hip = hipSum / samples;
+    std::cout << "Weight shift " << focus << " fraction " << fraction << " hip " << hip << " Nm peak " << maxHip
+              << " min z " << minZ << " min up " << minUp << "\n";
+    if (fraction < 0.65) return fail(focus + " foot did not take most of the load");
+    if (hip > 80.0 || maxHip > 95.0) return fail(focus + " stance hip saturated during the weight shift");
+    if (minZ < 0.72 || minUp < 0.80) return fail(focus + " pelvis collapsed during the weight shift");
+    if (errorSum / samples > 0.16) return fail(focus + " COM left the support region");
+    if (!quiet(1.5)) return fail(focus + " return to double support failed");
+    const BodyState back = physics.sample();
+    const double left = footLoad(back, "left");
+    const double right = footLoad(back, "right");
+    if (left < 20.0 || right < 20.0) return fail(focus + " did not return to double support");
+    return 0;
+  };
+
+  std::cout << "STATIC WEIGHT SHIFT\n";
+  boot();
+  if (const int shiftLeft = weightShift("left")) return shiftLeft;
+  boot();
+  if (const int shiftRight = weightShift("right")) return shiftRight;
+
+  auto singleSupport = [&](const std::string& stance, const std::string& lift) {
+    if (!quiet(2.5)) return fail(stance + " single support could not settle");
+    const int shiftSteps = std::max(1, static_cast<int>(std::lround(2.0 / dt)));
+    for (int step = 0; step < shiftSteps; ++step) {
+      if (!drive(false, false, {}, stance, "").first) return fail(stance + " pre-lift shift failed");
+    }
+    const BodyState liftedFrom = physics.sample();
+    const BodyKinematics* swing0 = bodyOf(liftedFrom, (lift + "_foot").c_str());
+    if (!swing0) return fail("swing foot missing");
+    const double swingZ0 = swing0->position.z;
+    double minZ = 10;
+    double endZ = 0;
+    double minUp = 1;
+    double hipSum = 0;
+    int hipHot = 0;
+    int air = 0;
+    int samples = 0;
+    double maxCapture = 0;
+    const int holdSteps = std::max(1, static_cast<int>(std::lround(2.2 / dt)));
+    for (int step = 0; step < holdSteps; ++step) {
+      const auto driven = drive(false, false, {}, stance, lift);
+      if (!driven.first) return fail(stance + " single support wrote root force or went non-finite");
+      if (step * dt < 0.45) continue;
+      const BodyState sample = physics.sample();
+      const BodyKinematics* swing = bodyOf(sample, (lift + "_foot").c_str());
+      const BodyKinematics* planted = bodyOf(sample, (stance + "_foot").c_str());
+      if (!swing || !planted) return fail("foot missing in single support");
+      double pelvisZ = 0;
+      double upZ = 0;
+      upright(sample, pelvisZ, upZ);
+      const double hip = std::abs(physics.appliedJointTorque(stance + "_hip_flex"));
+      const StandingReport report = standing.diagnose(sample);
+      minZ = std::min(minZ, pelvisZ);
+      endZ = pelvisZ;
+      minUp = std::min(minUp, upZ);
+      hipSum += hip;
+      if (hip > 95.0) ++hipHot;
+      if (report.supportValid) maxCapture = std::max(maxCapture, std::hypot(report.comErrorX, report.comErrorY));
+      const bool off = swing->position.z > swingZ0 + 0.03 && footLoad(sample, lift.c_str()) < 20.0;
+      const bool held = footLoad(sample, stance.c_str()) > 40.0 && planted->position.z < swingZ0 + 0.03;
+      if (off && held && pelvisZ > 0.70) ++air;
+      ++samples;
+    }
+    const double hip = samples > 0 ? hipSum / samples : 0;
+    std::cout << "Single support " << stance << " duration samples " << air << "/" << samples << " hip " << hip
+              << " Nm hot " << hipHot << " min z " << minZ << " end z " << endZ << " min up " << minUp
+              << " max capture " << maxCapture << "\n";
+    if (samples < 10 || air < samples * 8 / 10) return fail(stance + " foot did not stay off the floor");
+    if (minZ < 0.70 || endZ < minZ - 0.04 || minUp < 0.72) return fail(stance + " pelvis collapsed in single support");
+    if (hip > 85.0 || hipHot > samples / 3) return fail(stance + " stance hip stayed torque-saturated");
+    if (!quiet(1.5)) return fail(stance + " replant failed");
+    const BodyState replanted = physics.sample();
+    if (footLoad(replanted, "left") < 12.0 || footLoad(replanted, "right") < 12.0) {
+      return fail(stance + " did not replant into double support");
+    }
+    return 0;
+  };
+
+  std::cout << "SINGLE SUPPORT\n";
+  boot();
+  if (const int leftStance = singleSupport("left", "right")) return leftStance;
+  boot();
+  if (const int rightStance = singleSupport("right", "left")) return rightStance;
+
+  std::cout << "SINGLE SUPPORT DISTURBANCE\n";
+  boot();
+  if (!quiet(2.0)) return fail("disturbance stand failed");
+  for (int step = 0; step < static_cast<int>(std::lround(1.5 / dt)); ++step) {
+    if (!drive(false, false, {}, "left", "").first) return fail("disturbance shift failed");
+  }
+  for (int step = 0; step < static_cast<int>(std::lround(0.6 / dt)); ++step) {
+    if (!drive(false, false, {}, "left", "right").first) return fail("disturbance lift failed");
+  }
+  const double hipBefore = physics.appliedJointTorque("left_hip_flex");
+  const Vec3 comBefore = physics.sample().centerOfMass;
+  if (!physics.startBodyForcePulse("chest", forwardOf(physics.sample()) * 18.0, 0.08)) return fail("disturbance was rejected");
+  double torqueResponse = 0;
+  double comResponse = 0;
+  double disturbZ = 10;
+  double disturbUp = 1;
+  for (int step = 0; step < static_cast<int>(std::lround(1.2 / dt)); ++step) {
+    if (!drive(false, false, {}, "left", "right").first) return fail("disturbance response broke the simulator");
+    const BodyState sample = physics.sample();
+    torqueResponse = std::max(torqueResponse, std::abs(physics.appliedJointTorque("left_hip_flex") - hipBefore));
+    comResponse = std::max(comResponse, horizontal(sample.centerOfMass - comBefore));
+    double pelvisZ = 0;
+    double upZ = 0;
+    upright(sample, pelvisZ, upZ);
+    disturbZ = std::min(disturbZ, pelvisZ);
+    disturbUp = std::min(disturbUp, upZ);
+  }
+  std::cout << "Disturbance torque response " << torqueResponse << " Nm, COM response " << comResponse << " m, min z "
+            << disturbZ << " min up " << disturbUp << "\n";
+  if (disturbZ < 0.68 || disturbUp < 0.70) return fail("small single-support disturbance knocked the body down");
+  if (torqueResponse < 1.5 && comResponse < 0.008) return fail("single-support disturbance produced no controller response");
 
   struct GaitRun {
     int lifts = 0;

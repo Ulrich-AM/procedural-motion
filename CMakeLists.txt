@@ -165,6 +165,7 @@ add_executable(procedural_motion
   src/app/sim_config.cpp
   src/physics/physical_skeleton.cpp
   src/control/standing_controller.cpp
+  src/control/balance_controller.cpp
   src/control/leg_ik.cpp
   src/control/recovery_step.cpp
   src/control/foot_contact.cpp
