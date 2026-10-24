@@ -1,5 +1,6 @@
 #pragma once
 
+#include "control/control_frame.h"
 #include "physics/body_state.h"
 #include "skeleton/skeleton_definition.h"
 
@@ -35,21 +36,26 @@ class StandingController {
   void capture(const SkeletonDefinition& skeleton, const BodyState& state);
   void resetFilters();
   StandingReport diagnose(const BodyState& state) const;
-  StandingReport update(const BodyState& state, PhysicalSkeleton& physics);
+  // Writes stance objectives. The servo applies them. The free root is never commanded.
+  StandingReport update(const BodyState& state, ControlFrame& frame);
 
   // Empty, "left", or "right". That leg keeps its pose spring but does not
   // receive the two-foot balance term while it is the swing leg.
   void setSwingFoot(const std::string& side) { swingFoot_ = side; }
-  // Overwrite one hinge command with a torque toward target. blend 1 uses
-  // target; blend 0 uses the standing reference.
-  void trackHinge(const JointState& joint, double target, double blend, PhysicalSkeleton& physics);
+  // Added to the support center before the capture term. Walking uses this to
+  // let the body fall toward the desired direction instead of pinning the COM.
+  void setSupportShift(Vec3 shift) { supportShift_ = shift; }
 
   double peakTorque() const { return peakTorque_; }
+  void notePeak(double peak) { peakTorque_ = peak; }
   double referenceTarget(const std::string& jointName) const;
   // Move one standing reference onto the pose the leg actually landed in,
   // so the pose spring does not yank the hip back to the pre-step crouch.
   void shiftReference(const std::string& jointName, double angle);
   void noteAnkle(const std::string& jointName, double angle);
+  // Ease shifted joints back toward the captured stand so a landed step does not
+  // stay frozen in the swing crouch.
+  void relaxReferences(double dt);
 
  private:
   struct Tune {
@@ -65,6 +71,7 @@ class StandingController {
   Vec3 restForward_{0, 1, 0};
   Vec3 restUp_{0, 0, 1};
   std::unordered_map<std::string, double> targets_;
+  std::unordered_map<std::string, double> home_;
   double hipSagittal_ = 0;
   double hipLateral_ = 0;
   double lastTime_ = -1;
@@ -74,6 +81,7 @@ class StandingController {
   double ankleHoldLeft_ = 0.234;
   double ankleHoldRight_ = 0.234;
   std::string swingFoot_;
+  Vec3 supportShift_{};
 };
 
 const char* balanceLabel(BalanceStatus status);

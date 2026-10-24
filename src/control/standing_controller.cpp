@@ -122,6 +122,16 @@ void StandingController::shiftReference(const std::string& jointName, double ang
   found->second = angle;
 }
 
+void StandingController::relaxReferences(double dt) {
+  if (dt <= 0) return;
+  const double follow = 1.0 - std::exp(-dt / 0.55);
+  for (auto& entry : targets_) {
+    const auto home = home_.find(entry.first);
+    if (home == home_.end()) continue;
+    entry.second += (home->second - entry.second) * follow;
+  }
+}
+
 void StandingController::noteAnkle(const std::string& jointName, double angle) {
   if (!std::isfinite(angle) || jointName.find("ankle_pitch") == std::string::npos) return;
   const double held = std::clamp(angle, 0.05, 0.42);
@@ -179,6 +189,7 @@ void StandingController::capture(const SkeletonDefinition& skeleton, const BodyS
               << (hip ? targets_[hipName] : 0) << " rad, " << ankleName << " " << (ankle ? targets_[ankleName] : 0)
               << " rad (flexion sign " << sign << ")\n";
   }
+  home_ = targets_;
 }
 
 StandingReport StandingController::diagnose(const BodyState& state) const {
@@ -225,7 +236,7 @@ StandingReport StandingController::diagnose(const BodyState& state) const {
   addPlanted(rightWeight, "right_foot");
   if (feet > 0) {
     report.supportValid = true;
-    report.supportCenter = support / static_cast<double>(feet);
+    report.supportCenter = support / static_cast<double>(feet) + supportShift_;
     report.supportCenter.z = 0;
     report.comErrorX = report.supportCenter.x - state.centerOfMass.x;
     report.comErrorY = report.supportCenter.y - state.centerOfMass.y;
@@ -247,8 +258,7 @@ StandingReport StandingController::diagnose(const BodyState& state) const {
   return report;
 }
 
-StandingReport StandingController::update(const BodyState& state, PhysicalSkeleton& physics) {
-  physics.clearJointTorques();
+StandingReport StandingController::update(const BodyState& state, ControlFrame& frame) {
   StandingReport report = diagnose(state);
   report.active = true;
   peakTorque_ = 0;
@@ -295,6 +305,7 @@ StandingReport StandingController::update(const BodyState& state, PhysicalSkelet
 
   const double dt = lastTime_ >= 0 ? std::clamp(state.time - lastTime_, 0.0, 0.05) : 1.0 / 120.0;
   lastTime_ = state.time;
+  relaxReferences(dt);
   const double blend = 1.0 - std::exp(-dt / kHipFilter);
   const bool supported = report.supportValid && directional && (report.leftFootContact || report.rightFootContact);
   const double height = pelvis ? std::clamp(pelvis->position.z, 0.45, 1.15) : 0.9;
@@ -370,36 +381,21 @@ StandingReport StandingController::update(const BodyState& state, PhysicalSkelet
     }
 
     if (!std::isfinite(torque)) torque = 0;
-    torque = std::clamp(torque, -tune.limit, tune.limit);
-    if (!physics.setJointTorque(joint.name, torque, tune.limit)) torque = 0;
-    peakTorque_ = std::max(peakTorque_, std::abs(torque));
+    JointCommand command;
+    command.target = target;
+    command.kp = tune.kp;
+    command.kd = tune.kd;
+    command.limit = tune.limit;
+    // Pose PD is applied by the servo from target/kp/kd. The balance term is
+    // feedforward so a swing blend can fade it without a second torque write.
+    command.feedforward = torque - (tune.kp * (target - joint.angle) - tune.kd * joint.velocity);
+    if (!std::isfinite(command.feedforward)) command.feedforward = 0;
+    frame.setStance(joint.name, command);
   }
 
   report.peakTorque = peakTorque_;
   report.active = true;
   return report;
-}
-
-void StandingController::trackHinge(const JointState& joint, double target, double blend, PhysicalSkeleton& physics) {
-  Tune tune = tuneFor(joint.name);
-  // The standing hip-abduction spring is stiff enough to buzz at this timestep
-  // and never reaches a swing target. Swing tracking uses a softer loop.
-  if (joint.name.find("hip_abd") != std::string::npos) {
-    tune.kp = 420;
-    tune.kd = 32;
-  } else if (joint.name.find("hip_flex") != std::string::npos) {
-    tune.kp = 280;
-    tune.kd = 18;
-  } else if (joint.name.find("knee") != std::string::npos) {
-    tune.kp = 240;
-    tune.kd = 16;
-  }
-  const double goal = blend * target + (1.0 - blend) * targetFor(joint.name, joint.angle);
-  double torque = tune.kp * (goal - joint.angle) - tune.kd * joint.velocity;
-  if (!std::isfinite(torque)) torque = 0;
-  torque = std::clamp(torque, -tune.limit, tune.limit);
-  if (!physics.setJointTorque(joint.name, torque, tune.limit)) torque = 0;
-  peakTorque_ = std::max(peakTorque_, std::abs(torque));
 }
 
 }  // namespace pm

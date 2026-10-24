@@ -167,6 +167,11 @@ add_executable(procedural_motion
   src/control/standing_controller.cpp
   src/control/leg_ik.cpp
   src/control/recovery_step.cpp
+  src/control/foot_contact.cpp
+  src/control/joint_servo.cpp
+  src/control/locomotion_controller.cpp
+  src/control/control_step.cpp
+  src/tests/self_test.cpp
   src/render/viewer.cpp
   src/skeleton/skeleton_definition.cpp)
 add_dependencies(procedural_motion generate_skeleton)

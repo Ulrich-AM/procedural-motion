@@ -23,6 +23,9 @@ struct RenderFrame {
   Vec3 landing;
   Vec3 swingPath[8]{};
   int swingPathCount = 0;
+  bool drawVelocity = false;
+  Vec3 desiredVelocity;
+  Vec3 comVelocity;
   bool drawColliders = false;
   bool drawJointAxes = false;
 };

@@ -1,5 +1,7 @@
 #include "physics/physical_skeleton.h"
 
+#include "physics/physical_metrics.h"
+
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -380,12 +382,13 @@ class ModelBuilder {
       along.z = 0;
       along = normalize(along);
       if (length(along) < 0.5) along = {0, -1, 0};
-      constexpr double toe = 0.09;
-      constexpr double heel = 0.09;
-      constexpr double width = 0.08;
-      constexpr double height = 0.022;
+      const PhysicalMetrics metrics = defaultPhysicalMetrics();
+      const double toe = metrics.toe;
+      const double heel = metrics.heel;
+      const double width = metrics.halfWidth * 2.0;
+      const double height = metrics.soleHeight;
       // Keep the sole below the shin capsule so the round shin cannot become the contact.
-      constexpr double drop = 0.074;
+      const double drop = metrics.ankleHeight;
       const Vec3 center = ankle + along * ((toe - heel) * 0.5) + Vec3{0, 0, -drop + height * 0.5};
       const Vec3 yAxis = along;
       Vec3 zAxis{0, 0, 1};

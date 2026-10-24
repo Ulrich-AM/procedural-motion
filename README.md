@@ -4,15 +4,50 @@ Experimental fully procedural 3D humanoid motion. The long-term aim is walking, 
 
 **This project does not play animation.** The Y-Bot FBX is only a source of skeleton hierarchy and rest-pose proportions. No clips, keyframes, mocap, or pose playback are loaded into the simulator.
 
-## Phase 3 — Catch the step
+## Phase 3 — Landing handoff and continuous walking
 
-Phase 3 keeps the Phase 2 step and changes what happens around contact.
+Phase 3 does not play a walk cycle. There is still no clip, keyframe, or root motion. A desired horizontal velocity is turned into foot targets, a procedural swing, geometric IK, and limited hinge torques. Contacts stay physical.
 
-When the swing starts, the landing is recomputed from the capture point at that moment, and the stance leg's standing targets are copied from the joints as they are. That stops the pre-step hip spring from pitching the torso while one foot is in the air. The swing is shorter, about 0.28 to 0.42 s.
+### What was shaking
 
-On a real foot load, the swing leg's current angles become the new standing references, including the ankle hold, and both feet go back to the balance torques. The planner does not keep tracking the swing curve after contact, and it still does not chain a second step by itself.
+After a Phase 2 landing the swing leg kept chasing one world-space ankle position. The sole was already on the floor, so that target fought friction and the pose spring then froze the deep swing crouch. The handoff now fades. While the foot is in the air the swing command owns the leg. Once contact has been down long enough to count as planted, the swing target becomes the joint angles at that frame, and its weight goes from 1 to 0 in about 0.08 s. Standing balance takes the leg back. The achieved foot position is not held by a world-space spring.
 
-A forward push of 80 N for 0.12 s lifts the foot and plants it while the pelvis is still about 0.75 m high. The body still falls after that contact. The catch is the timing of the plant, not yet a saved stand. An extreme push still falls.
+Foot contact is no longer one frame of force. Each foot is Air, Touching, Planted, or Releasing, with a short filter and different enter and exit loads.
+
+### Commands
+
+Standing and the step planners write a `ControlFrame`. Each hinge command has a target, gains, a torque limit, an optional balance feedforward, and a swing weight. `JointServo` is the only stage that turns that into `qfrc_applied`. The free root is still never commanded. Timers use the physics timestep from the model, not a hardcoded 1/120.
+
+Sole length, width, and ankle height live in `PhysicalMetrics` and are shared by the body builder and the planners. Thigh and shin lengths are measured from the generated skeleton.
+
+### Walking math
+
+With the pelvis height `h` and a desired horizontal velocity:
+
+```text
+omega = sqrt(g / h)
+capture = COM + COMVelocity / omega
+velocityError = desiredVelocity - COMVelocity
+
+target = capture
+       + desiredVelocity * 0.28
+       + velocityError * 0.10
+       + lateralStanceOffset
+```
+
+The target is then pulled back to the live leg reach. A minimum lead along the desired direction keeps the step from landing under the foot that is already there. Step time is
+
+```text
+duration = clamp(0.62 - 0.12 * speed, 0.42, 0.70)
+```
+
+so a faster request is a shorter step, inside about 0.42 to 0.70 s. The swing curve is the same smoothstep used in Phase 2, with a little extra clearance as speed rises. Nothing is stored.
+
+While a nonzero velocity is requested, the standing support center is shifted a few centimeters along that velocity so the body is allowed to fall toward the next foot instead of being pinned between both soles. Arms leave the T-pose by a shoulder-abduction target that eases in when a step starts. A small opposite-phase shoulder flex is added during the swing. Desired velocity is capped at 1.4 m/s. There is no run and no yaw turn.
+
+Recovery stepping still exists with Walking off. It may take up to three capture steps if the first one leaves the capture point outside. An 80 N forward push lifts a foot about 18 cm, moves it about 9 cm toward a 16 cm landing, and plants while the pelvis is still about 0.80 m high. The body still falls afterward. A quiet stand with recovery on does not creep: about 2 cm of drift in 4 s, foot speed near zero. An extreme push still falls.
+
+Continuous walking is wired through the same swing and IK path. In the self-test a 0.8 m/s forward request produces repeated foot lifts, then the pelvis drops. It does not yet hold a gait. That failure is a real test failure, not a hidden one.
 
 ## Phase 2 — One recovery step
 
@@ -133,12 +168,14 @@ The controller clears its torques every step and writes them into MuJoCo's gener
 | G | Gravity on / off |
 | C | Collision shape debug view |
 | J | Joint axis debug view |
-| A | Active standing on / off |
-| S | Recovery stepping on / off |
+| W A S D | Desired walk velocity, up to 1.4 m/s, in the character's horizontal frame |
+| V | Walking on / off |
+| T | Active standing on / off |
+| Y | Recovery stepping on / off (used when Walking is off) |
 | P | Push the chest forward |
 | Home | Reset the camera |
 
-The panel has the same switches, plus Forward / Back / Left / Right push buttons and a magnitude slider (20 to 250 N, 0.12 s). The button only sets the Cartesian force. The step planner never reads which button was pressed. The panel shows balance, step state, swing foot, capture error, step distance, and step phase. Floor markers: COM sphere, gray support center, a small cross at the capture point, a ring at the landing, and a thin line for the swing curve.
+The panel has the same switches, plus Forward / Back / Left / Right push buttons and a magnitude slider (20 to 250 N, 0.12 s). The button only sets the Cartesian force. The step planner never reads which button was pressed. The panel shows the locomotion state, desired and actual horizontal velocity, swing foot, step phase, distance, duration, capture error, both foot contact states, and peak torque. Floor markers: COM sphere, gray support center, a small cross at the capture point, a ring at the landing, a thin swing curve, and two short arrows for desired velocity and COM velocity.
 
 The camera orbits a fixed point near the pelvis and chest. It does not follow the ragdoll.
 
@@ -184,7 +221,7 @@ Physics check without a window:
 build\Release\procedural_motion.exe --self-test
 ```
 
-The self-test runs the Phase 0 passive fall first, then the active stand with recovery off. The stand must keep the pelvis upright for the last 4 seconds of a 10 second run, with both feet down and the center of mass near the support. A 220 N chest push for 0.20 s must still knock that stand over. Recovery is then turned on: three quiet seconds must not request a step, and the ankle pitch must stay off its range stop. An 80 N forward push must lift one foot, move it toward the computed landing, and plant while the pelvis is still above 0.65 m. A 140 N lateral push must lift a foot and plant while the pelvis is still that high. The sideways travel toward the target is still small. A 400 N push must still end in a fall. Root generalized force stays zero, and every hinge torque stays inside its limit.
+The self-test runs the Phase 0 passive fall first, then the active stand with recovery off. The stand must keep the pelvis upright for the last 4 seconds of a 10 second run, with both feet down and the center of mass near the support. A 220 N chest push for 0.20 s must still knock that stand over. Recovery is then turned on: three quiet seconds must not request a step, and the ankle pitch must stay off its range stop. An 80 N forward push must lift one foot, move it toward the computed landing, and plant while the pelvis is still above 0.65 m. A 140 N lateral push must lift a foot and plant while the pelvis is still that high. A 400 N push must still end in a fall. A quiet recovery stand must not creep. Walking checks then request 0.8 m/s forward and require repeated physical steps and real forward travel. That walk check currently fails because the body falls. Root generalized force stays zero, and every hinge torque stays inside its limit.
 
 Or, after a build:
 
@@ -223,7 +260,8 @@ procedural-motion/
   config/lab.json            timestep, gravity, spawn clearance
   src/main.cpp
   src/app/                   window, input, fixed timestep, debug UI
-  src/control/               standing controller, capture-point step planner, leg IK
+  src/control/               standing, recovery, locomotion, contact, command frame, servo, leg IK
+  src/tests/                 headless regressions
   src/skeleton/              canonical bone list and JSON loader
   src/physics/               MuJoCo bodies, joints, state queries, hinge torques
   src/render/                orbit camera, primitive view, floor grid
@@ -280,8 +318,8 @@ The measured source names and positions are written to `assets/generated/skeleto
 ## Limitations
 
 - Quiet standing on the flat sole is stable for the 10 second self-test, with ankles near 0.30 rad rather than the ±0.70 rad stop. It is still a narrow ankle strategy. The sole is only 18 cm long.
-- A recovery step lifts a foot, moves it toward the capture-point target, and plants on a real contact. For an 80 N forward push the pelvis is still about 0.75 m high at that contact, then the stand after landing falls. One step is not yet a reliable save.
-- The planner will not chain steps. There is no walk cycle.
+- A recovery step lifts a foot, moves it toward the capture-point target, and plants on a real contact. For an 80 N forward push the pelvis is still about 0.80 m high at that contact, then the stand after landing falls. Up to three capture steps are allowed. They do not yet save that push.
+- Walking is a second planner on the same swing and IK path. A forward velocity request repeats steps, then the pelvis drops. It is not a stable gait yet.
 - The leg IK matches knee flexion well and needs a measured hip bias because the crouched hip angle is not the geometric thigh-from-vertical angle. Swing tracking is torque PD, so the foot arrives late and short of a far target.
 - Joint limits are simple hinges, not anatomical joint surfaces. Ankle pitch is only ±40 degrees, which limits how far the stance shin can tilt while the sole stays flat.
 - Clavicles are not rigid bodies.
@@ -293,4 +331,4 @@ The measured source names and positions are written to `assets/generated/skeleto
 
 ## Next phase
 
-The open problem is the moment after contact. The foot can plant while the pelvis is still high, and the two-foot stand that follows still loses the center of mass. The next step is a settle that holds that landed support, still as one recovery step and still without a gait cycle. Repeated stepping, turning, and rough terrain come after a single save stays upright.
+Do not add running, turning, or terrain yet. The open problem is still the step after contact: the foot can plant while the pelvis is high, and neither the recovery follow-up nor the walking loop keeps the center of mass over the new sole. Phase 4 should make one physical step finish in a stand that is still upright a few seconds later. Style, yaw, and speed tracking come after that hold is real.

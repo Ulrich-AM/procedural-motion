@@ -222,6 +222,13 @@ void Viewer::render(mjData* data, const RenderFrame& frame) {
     const float path[4] = {0.2f, 0.2f, 0.2f, 1.f};
     addPath(frame.swingPath, frame.swingPathCount, path);
   }
+  if (frame.drawVelocity) {
+    const Vec3 origin{frame.com.x, frame.com.y, 0.03};
+    const float actual[4] = {0.35f, 0.35f, 0.35f, 1.f};
+    const float desired[4] = {0.08f, 0.08f, 0.08f, 1.f};
+    addCapsule(origin, origin + Vec3{frame.comVelocity.x, frame.comVelocity.y, 0} * 0.35, 0.004, actual);
+    addCapsule(origin, origin + Vec3{frame.desiredVelocity.x, frame.desiredVelocity.y, 0} * 0.35, 0.003, desired);
+  }
   if (frame.drawJointAxes) addJointAxes(data);
 
   mjrRect viewport{0, 0, width, height};
