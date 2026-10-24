@@ -123,7 +123,7 @@ void StandingController::shiftReference(const std::string& jointName, double ang
 }
 
 void StandingController::relaxReferences(double dt) {
-  if (dt <= 0) return;
+  if (dt <= 0 || holdReferences_) return;
   const double follow = 1.0 - std::exp(-dt / 0.55);
   for (auto& entry : targets_) {
     const auto home = home_.find(entry.first);
@@ -236,7 +236,25 @@ StandingReport StandingController::diagnose(const BodyState& state) const {
   addPlanted(rightWeight, "right_foot");
   if (feet > 0) {
     report.supportValid = true;
-    report.supportCenter = support / static_cast<double>(feet) + supportShift_;
+    report.supportCenter = support / static_cast<double>(feet);
+  }
+  if (stanceFocus_ == "left" || stanceFocus_ == "right") {
+    const bool focusLeft = stanceFocus_ == "left";
+    const double weight = focusLeft ? leftWeight : rightWeight;
+    const BodyKinematics* foot = findBody(supportBodies, focusLeft ? "left_foot" : "right_foot");
+    if (foot && weight > 1.0) {
+      report.supportValid = true;
+      const Vec3 sole = foot->position;
+      if (feet > 0) {
+        const Vec3 mid = report.supportCenter;
+        report.supportCenter = mid * (1.0 - stanceBias_) + sole * stanceBias_;
+      } else {
+        report.supportCenter = sole;
+      }
+    }
+  }
+  if (report.supportValid) {
+    report.supportCenter = report.supportCenter + supportShift_;
     report.supportCenter.z = 0;
     report.comErrorX = report.supportCenter.x - state.centerOfMass.x;
     report.comErrorY = report.supportCenter.y - state.centerOfMass.y;
@@ -310,8 +328,8 @@ StandingReport StandingController::update(const BodyState& state, ControlFrame& 
   const bool supported = report.supportValid && directional && (report.leftFootContact || report.rightFootContact);
   const double height = pelvis ? std::clamp(pelvis->position.z, 0.45, 1.15) : 0.9;
   const double omega = std::sqrt(kGravity / height);
-  const double sagCapture = sagErr - sagVel / omega;
-  const double latCapture = latErr - latVel / omega;
+  const double sagCapture = sagittalScale_ * (sagErr - sagVel / omega);
+  const double latCapture = lateralScale_ * (latErr - latVel / omega);
   if (supported) {
     hipSagittal_ += (sagCapture - hipSagittal_) * blend;
     hipLateral_ += (latCapture - hipLateral_) * blend;
@@ -321,7 +339,8 @@ StandingReport StandingController::update(const BodyState& state, ControlFrame& 
   }
 
   const int feet = (report.leftFootContact ? 1 : 0) + (report.rightFootContact ? 1 : 0);
-  const double share = feet > 0 ? 1.0 / static_cast<double>(feet) : 0;
+  // A designated swing leg is not a support. The stance ankle carries the whole term.
+  const double share = !swingFoot_.empty() ? 1.0 : (feet > 0 ? 1.0 / static_cast<double>(feet) : 0);
   const double weight = std::max(1.0, state.mass) * kGravity;
   double footLoad = 0;
   for (const ContactState& contact : state.contacts) {
@@ -353,6 +372,19 @@ StandingReport StandingController::update(const BodyState& state, ControlFrame& 
     const bool left = joint.name.rfind("left_", 0) == 0;
     const bool right = joint.name.rfind("right_", 0) == 0;
     const bool swinging = (!swingFoot_.empty() && joint.name.rfind(swingFoot_ + "_", 0) == 0);
+    const bool stanceKnee = joint.name.find("knee") != std::string::npos && !swinging &&
+                            (stanceFocus_.empty() || joint.name.rfind(stanceFocus_ + "_", 0) == 0);
+    if (stanceKnee && (kneeExtra_ > 0 || heightAssist_)) {
+      if (kneeExtra_ > 0) target -= kneeExtra_;
+      if (heightAssist_ && pelvis) {
+        const double heightError = pelvis->position.z - 0.90;
+        if (heightError < -0.06) target += std::min(0.08, -heightError * 0.25);
+        else if (heightError > 0.06) target -= 0.03;
+      }
+    }
+    if (heightAssist_ && !swinging && joint.name.find("hip_flex") != std::string::npos && pelvisLean_ != 0) {
+      target -= pelvisLean_;
+    }
     const bool footDown = (left && report.leftFootContact) || (right && report.rightFootContact);
     if (supported && footDown && share > 0 && !swinging) {
       if (joint.name.find("ankle_pitch") != std::string::npos) {
@@ -361,16 +393,17 @@ StandingReport StandingController::update(const BodyState& state, ControlFrame& 
       } else if (joint.name.find("ankle_roll") != std::string::npos) {
         // Positive roll tips the body toward character-left, so the sign is opposite the rightward error.
         torque += share * (-kAnkleLateral * 0.25 * weight * latCapture - kAnkleLean * latLean - kAnkleLatRate * latRate);
-      } else if (joint.name.find("hip_flex") != std::string::npos) {
+      } else if (hipBalance_ && joint.name.find("hip_flex") != std::string::npos) {
         // Positive hip flexion tips the torso backward when the feet stay down.
         torque += impactScale * share * (-kHipCapture * weight * hipSagittal_ + kHipLean * sagLean + 5.0 * sagRate);
-      } else if (joint.name.find("hip_abd") != std::string::npos) {
+      } else if (hipBalance_ && joint.name.find("hip_abd") != std::string::npos) {
         torque += impactScale * share * (kHipCapture * weight * hipLateral_ + kHipLean * latLean + 5.0 * latRate);
       }
     }
     if (supported && joint.name.find("spine") != std::string::npos) {
       if (joint.name.find("_flex") != std::string::npos) {
         torque += kSpineLean * chestSag + kSpineRate * sagRate;
+        if (heightAssist_) torque += 8.0 * pelvisLean_;
       } else if (joint.name.find("_abd") != std::string::npos) {
         torque += -kSpineLean * chestLat - kSpineRate * latRate;
       }

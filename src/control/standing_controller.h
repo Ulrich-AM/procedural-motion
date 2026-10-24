@@ -42,6 +42,23 @@ class StandingController {
   // Empty, "left", or "right". That leg keeps its pose spring but does not
   // receive the two-foot balance term while it is the swing leg.
   void setSwingFoot(const std::string& side) { swingFoot_ = side; }
+  // When set to "left" or "right", the balance target is that sole even if the
+  // other foot is still touching. Empty keeps the midpoint of every loaded foot.
+  void setStanceFocus(const std::string& side) { stanceFocus_ = side; }
+  // 0 keeps the two-foot midpoint. 1 uses the stance sole. Transfer uses a value in between.
+  void setStanceBias(double bias) { stanceBias_ = bias < 0 ? 0 : (bias > 1 ? 1 : bias); }
+  // Scales on the capture correction. Lateral can be tighter than sagittal.
+  void setCaptureScales(double sagittal, double lateral) {
+    sagittalScale_ = sagittal;
+    lateralScale_ = lateral;
+  }
+  // Extra stance-knee flexion, forward pelvis lean, and a leg-only height assist.
+  // All zero leaves the quiet stand unchanged. Nothing here writes the pelvis.
+  void setWalkPosture(double kneeExtra, double pelvisLean, bool heightAssist) {
+    kneeExtra_ = kneeExtra;
+    pelvisLean_ = pelvisLean;
+    heightAssist_ = heightAssist;
+  }
   // Added to the support center before the capture term. Walking uses this to
   // let the body fall toward the desired direction instead of pinning the COM.
   void setSupportShift(Vec3 shift) { supportShift_ = shift; }
@@ -56,6 +73,11 @@ class StandingController {
   // Ease shifted joints back toward the captured stand so a landed step does not
   // stay frozen in the swing crouch.
   void relaxReferences(double dt);
+  // While held, shifted joints stay where a step left them instead of sliding home.
+  void setHoldReferences(bool hold) { holdReferences_ = hold; }
+  // Single support turns this off. The standing hip balance term is already near
+  // the torque limit on two feet, and on one foot it folds the stance hip.
+  void setHipBalance(bool enabled) { hipBalance_ = enabled; }
 
  private:
   struct Tune {
@@ -81,6 +103,15 @@ class StandingController {
   double ankleHoldLeft_ = 0.234;
   double ankleHoldRight_ = 0.234;
   std::string swingFoot_;
+  std::string stanceFocus_;
+  double stanceBias_ = 1;
+  double sagittalScale_ = 1;
+  double lateralScale_ = 1;
+  double kneeExtra_ = 0;
+  double pelvisLean_ = 0;
+  bool heightAssist_ = false;
+  bool holdReferences_ = false;
+  bool hipBalance_ = true;
   Vec3 supportShift_{};
 };
 

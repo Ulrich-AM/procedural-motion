@@ -22,10 +22,21 @@ ControlOutput applyControl(const ControlInput& input, StandingController& standi
 
   feet.update(state, input.dt);
   ControlFrame frame;
-  if (input.walking && length(Vec3{input.desired.x, input.desired.y, 0}) > 0.05) {
-    standing.setSupportShift(normalize(Vec3{input.desired.x, input.desired.y, 0}) * 0.035);
+  standing.setSupportShift({});
+  if (input.walking) {
+    const LocoBalance hint = locomotion.balanceHint(input.desired);
+    standing.setSwingFoot(hint.swingFoot);
+    standing.setStanceFocus(hint.stanceFocus);
+    standing.setCaptureScales(hint.sagittalScale, hint.lateralScale);
+    standing.setWalkPosture(hint.kneeExtra, hint.pelvisLean, hint.heightAssist);
+    standing.setStanceBias(hint.stanceBias);
   } else {
-    standing.setSupportShift({});
+    standing.setStanceFocus("");
+    standing.setCaptureScales(1, 1);
+    standing.setWalkPosture(0, 0, false);
+    standing.setStanceBias(0);
+    standing.setHoldReferences(false);
+    standing.setHipBalance(true);
   }
   output.standing = standing.update(state, frame);
   if (input.walking) {

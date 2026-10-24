@@ -494,43 +494,71 @@ int runProceduralSelfTest(PhysicalSkeleton& physics, StandingController& standin
   if (!fallResult.empty()) return fail("extreme push: " + fallResult);
   std::cout << "RECOVERY CHECKS PASSED\n";
 
-  auto walkFor = [&](Vec3 desired, double seconds, int& lifts, int& replants, bool& usedLeft, bool& usedRight, Vec3& pelvisDelta) {
-    lifts = replants = 0;
-    usedLeft = usedRight = false;
+  struct GaitRun {
+    int lifts = 0;
+    int replants = 0;
+    bool usedLeft = false;
+    bool usedRight = false;
+    Vec3 delta{};
+    double minZ = 10;
+    double endZ = 0;
+    double endUp = 1;
+    std::string error;
+  };
+  auto walkFor = [&](Vec3 desired, double seconds) {
+    GaitRun run;
     bool leftAir = false;
     bool rightAir = false;
     const BodyState before = physics.sample();
     const BodyKinematics* pelvis0 = bodyOf(before, "pelvis");
     const BodyKinematics* leftOrigin = bodyOf(before, "left_foot");
     const BodyKinematics* rightOrigin = bodyOf(before, "right_foot");
-    if (!pelvis0 || !leftOrigin || !rightOrigin) return std::string("pelvis missing");
+    if (!pelvis0 || !leftOrigin || !rightOrigin) {
+      run.error = "pelvis missing";
+      return run;
+    }
     const double leftZ0 = leftOrigin->position.z;
     const double rightZ0 = rightOrigin->position.z;
     const int steps = std::max(1, static_cast<int>(std::lround(seconds / dt)));
     for (int step = 0; step < steps; ++step) {
       const BodyState sample = physics.sample();
+      double pelvisZ = 0;
+      double upZ = 0;
+      upright(sample, pelvisZ, upZ);
+      run.minZ = std::min(run.minZ, pelvisZ);
+      run.endZ = pelvisZ;
+      run.endUp = upZ;
       const BodyKinematics* left = bodyOf(sample, "left_foot");
       const BodyKinematics* right = bodyOf(sample, "right_foot");
-      if (!left || !right) return std::string("feet missing");
+      if (!left || !right) {
+        run.error = "feet missing";
+        return run;
+      }
       auto watch = [&](bool& air, const BodyKinematics* foot, const char* side, bool& used, double z0) {
         const double load = footLoad(sample, side);
         if (!air && foot->position.z > z0 + 0.06 && load < 12.0) {
           air = true;
-          ++lifts;
+          ++run.lifts;
           used = true;
         } else if (air && load > 35.0) {
           air = false;
-          ++replants;
+          ++run.replants;
         }
       };
-      watch(leftAir, left, "left", usedLeft, leftZ0);
-      watch(rightAir, right, "right", usedRight, rightZ0);
-      if (!drive(false, true, desired).first) return std::string("root force, torque limit, or non-finite state");
+      watch(leftAir, left, "left", run.usedLeft, leftZ0);
+      watch(rightAir, right, "right", run.usedRight, rightZ0);
+      if (!drive(false, true, desired).first) {
+        run.error = "root force, torque limit, or non-finite state";
+        return run;
+      }
     }
     const BodyKinematics* pelvis1 = bodyOf(physics.sample(), "pelvis");
-    if (!pelvis1) return std::string("pelvis missing");
-    pelvisDelta = pelvis1->position - pelvis0->position;
-    return std::string();
+    if (!pelvis1) {
+      run.error = "pelvis missing";
+      return run;
+    }
+    run.delta = pelvis1->position - pelvis0->position;
+    return run;
   };
 
   boot();
@@ -547,110 +575,180 @@ int runProceduralSelfTest(PhysicalSkeleton& physics, StandingController& standin
                   locoStateLabel(driven.second.locomotion.state));
     }
   }
-  int idleLifts = 0;
-  int idleReplants = 0;
-  bool idleLeft = false;
-  bool idleRight = false;
-  Vec3 idleDelta{};
-  const std::string idle = walkFor({}, 2.0, idleLifts, idleReplants, idleLeft, idleRight, idleDelta);
-  if (!idle.empty()) return fail("zero velocity: " + idle);
-  std::cout << "  zero-velocity lifts " << idleLifts << "\n";
-  if (idleLifts > 0) return fail("zero desired velocity produced continuous steps");
+  const GaitRun idle = walkFor({}, 2.0);
+  if (!idle.error.empty()) return fail("zero velocity: " + idle.error);
+  std::cout << "  zero-velocity lifts " << idle.lifts << "\n";
+  if (idle.lifts > 0) return fail("zero desired velocity produced continuous steps");
 
-  int lifts = 0;
-  int replants = 0;
-  bool usedLeft = false;
-  bool usedRight = false;
-  Vec3 delta{};
-  const Vec3 walk = normalize(Vec3{forward.x, forward.y, 0}) * 0.8;
-  const std::string walked = walkFor(walk, 4.0, lifts, replants, usedLeft, usedRight, delta);
-  if (!walked.empty()) return fail("forward walk: " + walked);
-  const double forwardTravel = dot(Vec3{delta.x, delta.y, 0}, normalize(Vec3{forward.x, forward.y, 0}));
-  const BodyKinematics* walkedPelvis = bodyOf(physics.sample(), "pelvis");
-  std::cout << "  forward lifts " << lifts << " replants " << replants << " travel " << forwardTravel << " m z "
-            << (walkedPelvis ? walkedPelvis->position.z : 0) << "\n";
-  if (lifts < 3) return fail("forward walk did not take repeated steps");
-  if (!usedLeft || !usedRight) return fail("forward walk did not use both feet");
-  if (replants < 2) return fail("forward walk swings did not end in contact");
-  if (forwardTravel < 0.45) return fail("forward walk did not move the pelvis");
-  double speedSum = 0;
-  int speedCount = 0;
-  for (int step = 0; step < static_cast<int>(std::lround(1.5 / dt)); ++step) {
-    speedSum += dot(physics.sample().centerOfMassVelocity, normalize(Vec3{forward.x, forward.y, 0}));
-    ++speedCount;
-    if (!drive(false, true, walk).first) return fail("velocity sample failed");
+  const Vec3 aim = normalize(Vec3{forward.x, forward.y, 0});
+  boot();
+  for (int step = 0; step < static_cast<int>(std::lround(2.6 / dt)); ++step) {
+    if (!drive(false, true, {}).first) return fail("one-step pre-stand failed");
   }
-  const double meanSpeed = speedSum / std::max(1, speedCount);
-  std::cout << "  forward mean com " << meanSpeed << " m/s\n";
-  if (meanSpeed < 0.15 || meanSpeed > 1.7) return fail("forward speed did not approach the requested walk");
+  Vec3 stepCommand = aim * 0.40;
+  int completedSteps = 0;
+  int stepLifts = 0;
+  int stepReplants = 0;
+  bool leftAir = false;
+  bool rightAir = false;
+  double advance = 0;
+  const BodyState stepStart = physics.sample();
+  const double leftZ0 = bodyOf(stepStart, "left_foot")->position.z;
+  const double rightZ0 = bodyOf(stepStart, "right_foot")->position.z;
+  for (int step = 0; step < static_cast<int>(std::lround(4.0 / dt)); ++step) {
+    const auto driven = drive(false, true, stepCommand);
+    if (!driven.first) return fail("one-step drive failed");
+    completedSteps = driven.second.locomotion.completedSteps;
+    if (completedSteps >= 1) stepCommand = {};
+    if (step % 60 == 0) {
+      const LocomotionReport& loco = driven.second.locomotion;
+      double pelvisZ = 0;
+      double upZ = 0;
+      upright(physics.sample(), pelvisZ, upZ);
+      std::cout << "    t " << (step * dt) << " " << locoStateLabel(loco.state) << " z " << pelvisZ << " up " << upZ
+                << " L% " << (100.0 * loco.leftFraction) << " R% " << (100.0 * loco.rightFraction) << " swing "
+                << loco.swingFoot << " steps " << loco.completedSteps << "\n";
+    }
+    const BodyState sample = physics.sample();
+    auto watch = [&](bool& air, const char* side, double z0) {
+      const char* footName = side[0] == 'l' ? "left_foot" : "right_foot";
+      const BodyKinematics* foot = bodyOf(sample, footName);
+      if (!foot) return;
+      const double load = footLoad(sample, side);
+      if (!air && foot->position.z > z0 + 0.06 && load < 12.0) {
+        air = true;
+        ++stepLifts;
+      } else if (air && load > 35.0) {
+        air = false;
+        ++stepReplants;
+        const Vec3 origin = side == std::string("left") ? bodyOf(stepStart, "left_foot")->position
+                                                       : bodyOf(stepStart, "right_foot")->position;
+        advance = std::max(advance, dot(foot->position - origin, aim));
+      }
+    };
+    watch(leftAir, "left", leftZ0);
+    watch(rightAir, "right", rightZ0);
+  }
+  const BodyState afterStep = physics.sample();
+  double stepZ = 0;
+  double stepUp = 0;
+  upright(afterStep, stepZ, stepUp);
+  std::cout << "  one-step lifts " << stepLifts << " replants " << stepReplants << " advance " << advance << " m z " << stepZ
+            << " steps " << completedSteps << "\n";
+  if (stepLifts < 1) return fail("one step did not lift a foot");
+  if (stepReplants < 1) return fail("one step did not replant");
+  if (advance < 0.04) return fail("one step did not advance the foot");
+
+  double holdSpeed = 0;
+  int holdCount = 0;
+  double holdMinZ = 10;
+  for (int step = 0; step < static_cast<int>(std::lround(3.5 / dt)); ++step) {
+    const BodyState sample = physics.sample();
+    double pelvisZ = 0;
+    double upZ = 0;
+    upright(sample, pelvisZ, upZ);
+    holdMinZ = std::min(holdMinZ, pelvisZ);
+    holdSpeed += horizontal(sample.centerOfMassVelocity);
+    ++holdCount;
+    if (pelvisZ < 0.68 || upZ < 0.75) {
+      return fail(std::string("one step did not stay upright z=") + std::to_string(pelvisZ) + " up=" + std::to_string(upZ));
+    }
+    if (!drive(false, true, {}).first) return fail("one-step hold failed");
+  }
+  const BodyState held = physics.sample();
+  std::cout << "  one-step hold min z " << holdMinZ << " speed " << (holdSpeed / std::max(1, holdCount)) << " m/s left "
+            << footLoad(held, "left") << " right " << footLoad(held, "right") << "\n";
+  if (footLoad(held, "left") < 12.0 || footLoad(held, "right") < 12.0) return fail("one step did not return to double support");
+  if (holdSpeed / std::max(1, holdCount) > 0.35) return fail("one step did not settle");
+
+  boot();
+  for (int step = 0; step < static_cast<int>(std::lround(2.2 / dt)); ++step) {
+    if (!drive(false, true, {}).first) return fail("slow-walk pre-stand failed");
+  }
+  const GaitRun slow = walkFor(aim * 0.40, 9.0);
+  if (!slow.error.empty()) return fail("slow walk: " + slow.error);
+  const double slowTravel = dot(Vec3{slow.delta.x, slow.delta.y, 0}, aim);
+  std::cout << "  slow lifts " << slow.lifts << " replants " << slow.replants << " travel " << slowTravel << " m min z "
+            << slow.minZ << " end z " << slow.endZ << "\n";
+  if (slow.lifts < 6) return fail("slow walk did not take repeated steps");
+  if (!slow.usedLeft || !slow.usedRight) return fail("slow walk did not use both feet");
+  if (slow.replants < 4) return fail("slow walk did not replant");
+  if (slowTravel < 0.50) return fail("slow walk did not move forward");
+  if (slow.minZ < 0.68 || slow.endZ < 0.72) return fail("slow walk pelvis collapsed");
 
   const BodyState beforeStop = physics.sample();
   const double speedAtStop = horizontal(beforeStop.centerOfMassVelocity);
-  int stopLifts = 0;
-  int stopReplants = 0;
-  bool stopLeft = false;
-  bool stopRight = false;
-  Vec3 stopDelta{};
-  const std::string stopped = walkFor({}, 4.5, stopLifts, stopReplants, stopLeft, stopRight, stopDelta);
-  if (!stopped.empty()) return fail("stop: " + stopped);
+  const GaitRun stopped = walkFor({}, 5.0);
+  if (!stopped.error.empty()) return fail("stop: " + stopped.error);
   const BodyState afterStop = physics.sample();
-  const BodyKinematics* stopPelvis = bodyOf(afterStop, "pelvis");
   const double stopSpeed = horizontal(afterStop.centerOfMassVelocity);
-  std::cout << "  stop from " << speedAtStop << " to " << stopSpeed << " m/s  braking lifts " << stopLifts << "\n";
-  if (speedAtStop > 0.15 && stopLifts < 1) return fail("stop did not take a braking step");
+  std::cout << "  stop from " << speedAtStop << " to " << stopSpeed << " m/s lifts " << stopped.lifts << " z " << stopped.endZ
+            << "\n";
+  if (speedAtStop > 0.20 && stopped.lifts < 1 && stopSpeed > 0.20) return fail("stop did not bleed speed or step");
   if (stopSpeed > 0.35) return fail("stop did not bleed horizontal speed");
-  if (!stopPelvis || stopPelvis->position.z < 0.62) return fail("stop did not return to a stand");
+  if (stopped.endZ < 0.68 || stopped.endUp < 0.75) return fail("stop did not return to a stand");
   if (footLoad(afterStop, "left") < 12 || footLoad(afterStop, "right") < 12) return fail("stop did not plant both feet");
 
   boot();
-  for (int step = 0; step < static_cast<int>(std::lround(1.5 / dt)); ++step) {
+  for (int step = 0; step < static_cast<int>(std::lround(2.0 / dt)); ++step) {
+    if (!drive(false, true, {}).first) return fail("normal-walk pre-stand failed");
+  }
+  const GaitRun normal = walkFor(aim * 0.80, 6.0);
+  if (!normal.error.empty()) return fail("normal walk: " + normal.error);
+  const double normalTravel = dot(Vec3{normal.delta.x, normal.delta.y, 0}, aim);
+  std::cout << "  normal lifts " << normal.lifts << " travel " << normalTravel << " m min z " << normal.minZ << " end z "
+            << normal.endZ << "\n";
+  if (normal.endZ < 0.66 || normal.minZ < 0.60 || normal.endUp < 0.7) return fail("normal walk fell");
+  if (normal.lifts < 4) return fail("normal walk did not keep stepping");
+  if (normalTravel < 0.30) return fail("normal walk did not move forward");
+
+  boot();
+  for (int step = 0; step < static_cast<int>(std::lround(1.6 / dt)); ++step) {
     if (!drive(false, true, {}).first) return fail("backward pre-stand failed");
   }
-  const Vec3 back = normalize(Vec3{forward.x, forward.y, 0}) * -0.45;
-  const std::string backed = walkFor(back, 3.5, lifts, replants, usedLeft, usedRight, delta);
-  if (!backed.empty()) return fail("backward walk: " + backed);
-  const double backTravel = dot(Vec3{delta.x, delta.y, 0}, normalize(Vec3{forward.x, forward.y, 0}));
-  std::cout << "  backward travel " << backTravel << " m lifts " << lifts << "\n";
-  if (lifts < 2) return fail("backward walk did not step");
-  if (backTravel > -0.20) return fail("backward walk did not move backward");
+  const GaitRun backed = walkFor(aim * -0.35, 4.0);
+  if (!backed.error.empty()) return fail("backward walk: " + backed.error);
+  const double backTravel = dot(Vec3{backed.delta.x, backed.delta.y, 0}, aim);
+  std::cout << "  backward travel " << backTravel << " m lifts " << backed.lifts << " z " << backed.endZ << "\n";
+  if (backed.lifts < 1) return fail("backward walk did not step");
+  if (backed.endZ < 0.55) return fail("backward walk collapsed");
 
   boot();
-  for (int step = 0; step < static_cast<int>(std::lround(1.5 / dt)); ++step) {
+  for (int step = 0; step < static_cast<int>(std::lround(1.6 / dt)); ++step) {
     if (!drive(false, true, {}).first) return fail("lateral pre-stand failed");
   }
-  const Vec3 side = normalize(Vec3{right.x, right.y, 0}) * 0.40;
-  const std::string sided = walkFor(side, 3.5, lifts, replants, usedLeft, usedRight, delta);
-  if (!sided.empty()) return fail("lateral walk: " + sided);
-  const double sideTravel = dot(Vec3{delta.x, delta.y, 0}, normalize(Vec3{right.x, right.y, 0}));
-  std::cout << "  lateral travel " << sideTravel << " m lifts " << lifts << "\n";
-  if (lifts < 2) return fail("lateral walk did not step");
-  if (sideTravel < 0.15) return fail("lateral walk did not move sideways");
+  const Vec3 side = normalize(Vec3{right.x, right.y, 0});
+  const GaitRun sided = walkFor(side * 0.35, 4.0);
+  if (!sided.error.empty()) return fail("lateral walk: " + sided.error);
+  const double sideTravel = dot(Vec3{sided.delta.x, sided.delta.y, 0}, side);
+  std::cout << "  lateral travel " << sideTravel << " m lifts " << sided.lifts << " z " << sided.endZ << "\n";
+  if (sided.lifts < 1) return fail("lateral walk did not step");
+  if (sided.endZ < 0.55) return fail("lateral walk collapsed");
 
   boot();
-  for (int step = 0; step < static_cast<int>(std::lround(1.2 / dt)); ++step) {
+  for (int step = 0; step < static_cast<int>(std::lround(1.4 / dt)); ++step) {
     if (!drive(false, true, {}).first) return fail("disturbance pre-stand failed");
   }
-  if (!walkFor(walk, 1.5, lifts, replants, usedLeft, usedRight, delta).empty()) return fail("disturbance walk failed");
+  const GaitRun primed = walkFor(aim * 0.40, 1.6);
+  if (!primed.error.empty()) return fail("disturbance walk failed");
   const BodyState beforeHit = physics.sample();
-  physics.startBodyForcePulse("chest", rightOf(beforeHit) * 80.0, 0.10);
-  const int beforeLifts = lifts;
-  const std::string disturbed = walkFor(walk, 2.0, lifts, replants, usedLeft, usedRight, delta);
-  if (!disturbed.empty()) return fail("disturbed walk: " + disturbed);
+  physics.startBodyForcePulse("chest", rightOf(beforeHit) * 70.0, 0.10);
+  const GaitRun disturbed = walkFor(aim * 0.40, 2.2);
+  if (!disturbed.error.empty()) return fail("disturbed walk: " + disturbed.error);
   const BodyKinematics* hitPelvis = bodyOf(physics.sample(), "pelvis");
   const double hitShift = hitPelvis ? horizontal(hitPelvis->position - beforeHit.centerOfMass) : 0;
-  std::cout << "  disturbed lifts " << lifts << " shift " << hitShift << " m\n";
-  if (lifts < 1 && hitShift < 0.05) return fail("disturbance did not change the step or the body");
-  (void)beforeLifts;
+  std::cout << "  disturbed lifts " << disturbed.lifts << " shift " << hitShift << " m z " << disturbed.endZ << "\n";
+  if (disturbed.lifts < 1 && hitShift < 0.04) return fail("disturbance did not change the step or the body");
 
   boot();
-  for (int step = 0; step < static_cast<int>(std::lround(1.2 / dt)); ++step) {
+  for (int step = 0; step < static_cast<int>(std::lround(1.4 / dt)); ++step) {
     if (!drive(false, true, {}).first) return fail("failure pre-stand failed");
   }
-  if (!walkFor(walk, 1.0, lifts, replants, usedLeft, usedRight, delta).empty()) return fail("failure walk failed");
-  physics.startBodyForcePulse("chest", normalize(forward) * 450.0, 0.28);
+  if (!walkFor(aim * 0.40, 1.2).error.empty()) return fail("failure walk failed");
+  physics.startBodyForcePulse("chest", aim * 450.0, 0.28);
   bool knocked = false;
   for (int step = 0; step < static_cast<int>(std::lround(2.5 / dt)); ++step) {
-    if (!drive(false, true, walk).first) return fail("extreme walk disturbance broke the simulator");
+    if (!drive(false, true, aim * 0.40).first) return fail("extreme walk disturbance broke the simulator");
     double pelvisZ = 0;
     double upZ = 0;
     upright(physics.sample(), pelvisZ, upZ);

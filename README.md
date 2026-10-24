@@ -4,6 +4,18 @@ Experimental fully procedural 3D humanoid motion. The long-term aim is walking, 
 
 **This project does not play animation.** The Y-Bot FBX is only a source of skeleton hierarchy and rest-pose proportions. No clips, keyframes, mocap, or pose playback are loaded into the simulator.
 
+## Phase 4 — Support transfer
+
+Phase 4 does not play a walk cycle. Support is computed from the planted soles, not from the pelvis. `SupportState` records each foot, the support center, the sole bounds, and the left/right load fraction. Locomotion and recovery both use it. The gait states are Standing, Transfer, LeftSwing, RightSwing, Landing, Stopping, and Fallen.
+
+A step is not supposed to start because a timer expired. Transfer moves the balance target toward the stance sole and waits until that foot is Planted, its load fraction is above about 0.58, and the swing foot is under about 0.45. A 0.55 s timeout can still lift if the fraction is above 0.52 and the pelvis is upright. After the new sole is down, Landing waits until that foot is carrying load before the other leg may swing. Single support uses the stance sole as the balance target. Sagittal capture gain is lower than lateral gain so a forward fall is allowed and a sideways fall is not. Swing hip torque is capped near 18 Nm so the swing cannot pitch the pelvis by itself.
+
+That transfer does what it was asked to do. From a quiet stand, a 0.4 m/s forward request starts in Transfer with the load near 49/51 and the pelvis at 0.94 m, up axis 0.97. At 0.5 s the stance foot carries about 98 percent, the pelvis is still at 0.90 m, and the up axis is 0.84. The step is counted by 1.0 s, but the up axis is already 0.65 and the body then falls. Earlier in the same setup the stance hip ran from about -0.3 rad to past -0.7 rad during that swing. The one-step regression fails there. The 0.4 m/s and 0.8 m/s walks are not reached.
+
+The measured reason is the quiet-stand posture, not the missing swing. In that stand the feet sit about 13 cm behind the pelvis. Ground reaction through one sole is then a moment of about `75 kg * 9.81 * 0.13 m`, near 95 Nm, at the hip. The hip flexion limit is 100 Nm, and the quiet stand is already operating against that clamp: raising the limit to 120 Nm makes the 10 s stand fall. Two hips can share the moment. One hip cannot, once the other foot has actually unloaded. Crouching or straightening the hips during double support also drops the stand, because those targets fight the ankle equilibrium the 10 s test depends on. The failure is reported by the self-test. It is not a hidden skip.
+
+Load thresholds used for the lift are stance fraction 0.58 and swing fraction 0.45, with a 0.55 s fallback at 0.52. Landing accepts the new foot at fraction 0.40 after 0.16 s. None of those gates are the reason the one-step falls. The stance hip is already past its margin when the fraction first hits the gate.
+
 ## Phase 3 — Landing handoff and continuous walking
 
 Phase 3 does not play a walk cycle. There is still no clip, keyframe, or root motion. A desired horizontal velocity is turned into foot targets, a procedural swing, geometric IK, and limited hinge torques. Contacts stay physical.
@@ -319,7 +331,7 @@ The measured source names and positions are written to `assets/generated/skeleto
 
 - Quiet standing on the flat sole is stable for the 10 second self-test, with ankles near 0.30 rad rather than the ±0.70 rad stop. It is still a narrow ankle strategy. The sole is only 18 cm long.
 - A recovery step lifts a foot, moves it toward the capture-point target, and plants on a real contact. For an 80 N forward push the pelvis is still about 0.80 m high at that contact, then the stand after landing falls. Up to three capture steps are allowed. They do not yet save that push.
-- Walking is a second planner on the same swing and IK path. A forward velocity request repeats steps, then the pelvis drops. It is not a stable gait yet.
+- Walking transfers load onto the stance foot, then the stance hip folds and the pelvis drops. One hip at the 100 Nm limit cannot hold the quiet-stand lean once the other foot is unloaded. See Phase 4. The one-step self-test fails on this, and the longer walk checks do not run.
 - The leg IK matches knee flexion well and needs a measured hip bias because the crouched hip angle is not the geometric thigh-from-vertical angle. Swing tracking is torque PD, so the foot arrives late and short of a far target.
 - Joint limits are simple hinges, not anatomical joint surfaces. Ankle pitch is only ±40 degrees, which limits how far the stance shin can tilt while the sole stays flat.
 - Clavicles are not rigid bodies.
@@ -331,4 +343,4 @@ The measured source names and positions are written to `assets/generated/skeleto
 
 ## Next phase
 
-Do not add running, turning, or terrain yet. The open problem is still the step after contact: the foot can plant while the pelvis is high, and neither the recovery follow-up nor the walking loop keeps the center of mass over the new sole. Phase 4 should make one physical step finish in a stand that is still upright a few seconds later. Style, yaw, and speed tracking come after that hold is real.
+Do not add running, turning, or terrain yet. Phase 4 did not produce a step that stays upright. The next change has to move the pelvis back over the ankles, or lengthen the moment arm the hip can hold, without disturbing the two-foot stand that is already sitting on the 100 Nm hip clamp. Until one unloaded hip can hold that posture, more gait states will not make a sustained walk.

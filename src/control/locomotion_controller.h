@@ -4,6 +4,7 @@
 #include "control/foot_contact.h"
 #include "control/leg_ik.h"
 #include "control/standing_controller.h"
+#include "control/support_state.h"
 #include "physics/physical_metrics.h"
 #include "skeleton/skeleton_definition.h"
 
@@ -13,7 +14,20 @@ namespace pm {
 
 class PhysicalSkeleton;
 
-enum class LocoState { Standing, Starting, LeftSwing, RightSwing, Landing, Stopping, Fallen };
+enum class LocoState { Standing, Transfer, LeftSwing, RightSwing, Landing, Stopping, Fallen };
+
+// What the standing balance should do on the next control step.
+// Filled from the gait state so support transfer is explicit.
+struct LocoBalance {
+  std::string stanceFocus;
+  std::string swingFoot;
+  double sagittalScale = 1;
+  double lateralScale = 1;
+  double kneeExtra = 0;
+  double pelvisLean = 0;
+  bool heightAssist = false;
+  double stanceBias = 0;
+};
 
 struct LocomotionReport {
   bool enabled = false;
@@ -35,6 +49,16 @@ struct LocomotionReport {
   bool usedRight = false;
   Vec3 path[8]{};
   int pathCount = 0;
+  std::string stanceFoot;
+  std::string supportLabel;
+  std::string transfer;
+  double leftLoad = 0;
+  double rightLoad = 0;
+  double leftFraction = 0;
+  double rightFraction = 0;
+  double comHeight = 0;
+  Vec3 stanceSole{};
+  bool stanceSoleValid = false;
 };
 
 const char* locoStateLabel(LocoState state);
@@ -45,6 +69,8 @@ class LocomotionController {
  public:
   void reset();
   void capture(const SkeletonDefinition& skeleton, const BodyState& state);
+  // Uses the gait state from the previous update. Apply this before standing.
+  LocoBalance balanceHint(Vec3 desiredWorld) const;
   LocomotionReport update(const BodyState& state, StandingController& standing, ControlFrame& frame,
                           const FootContactTracker& feet, const PhysicalMetrics& metrics, Vec3 desiredWorld,
                           double dt, bool enabled);
@@ -90,6 +116,8 @@ class LocomotionController {
   double readyTime_ = 0;
   Vec3 capture_{};
   double captureError_ = 0;
+  bool stepCounted_ = false;
+  SupportState support_{};
 };
 
 }  // namespace pm

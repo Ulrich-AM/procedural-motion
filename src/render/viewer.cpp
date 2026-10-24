@@ -210,6 +210,10 @@ void Viewer::render(mjData* data, const RenderFrame& frame) {
   addGrid();
   if (frame.drawCom) addComMarker(frame.com);
   if (frame.drawSupport) addSupportMarker(frame.support);
+  if (frame.drawStance) {
+    const float stanceColor[4] = {0.95f, 0.55f, 0.15f, 1.0f};
+    addSphere(Vec3{frame.stance.x, frame.stance.y, 0.03}, 0.035, stanceColor);
+  }
   if (frame.drawCapture) {
     const float capture[4] = {0.15f, 0.15f, 0.15f, 1.f};
     addCross(frame.capture, capture);

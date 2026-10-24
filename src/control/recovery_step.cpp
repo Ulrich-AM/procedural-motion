@@ -1,6 +1,7 @@
 #include "control/recovery_step.h"
 
 #include "control/foot_placement.h"
+#include "control/support_state.h"
 #include "control/swing_command.h"
 
 #include <algorithm>
@@ -183,18 +184,15 @@ RecoveryReport RecoveryStep::update(const BodyState& state, StandingController& 
   capture.z = 0;
   report.capture = capture;
 
-  Vec3 support{};
-  double sagMin = 0, sagMax = 0, latMin = 0, latMax = 0;
-  bool supportValid = false;
-  supportOf(state, forward, right, support, sagMin, sagMax, latMin, latMax, supportValid);
+  const SupportState supportState = measureSupport(state, feet, metrics_, forward, right, capture, false);
+  const Vec3 support = supportState.center;
+  const bool supportValid = supportState.valid;
   report.support = support;
   report.supportValid = supportValid;
 
   const double sag = supportValid ? dot(capture - support, forward) : 0;
   const double lat = supportValid ? dot(capture - support, right) : 0;
-  const double outsideSag = supportValid ? std::max(0.0, std::max(sagMin - sag, sag - sagMax)) : 0;
-  const double outsideLat = supportValid ? std::max(0.0, std::max(latMin - lat, lat - latMax)) : 0;
-  report.captureError = std::hypot(outsideSag, outsideLat);
+  report.captureError = supportState.captureOutside;
   const bool upright = pelvis && pelvis->position.z > 0.62 && pelvisUp > 0.72;
   const bool recoverable = pelvis && pelvis->position.z > 0.55 && pelvisUp > 0.55;
   const bool fallen = !pelvis || pelvis->position.z < 0.45 || pelvisUp < 0.35;
@@ -206,7 +204,7 @@ RecoveryReport RecoveryStep::update(const BodyState& state, StandingController& 
     report.capture = capture;
     report.support = support;
     report.supportValid = supportValid;
-    report.captureError = std::hypot(outsideSag, outsideLat);
+    report.captureError = supportState.captureOutside;
     return report;
   }
 

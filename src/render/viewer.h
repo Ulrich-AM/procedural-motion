@@ -17,6 +17,8 @@ struct RenderFrame {
   bool drawCom = true;
   bool drawSupport = false;
   Vec3 support;
+  bool drawStance = false;
+  Vec3 stance;
   bool drawCapture = false;
   Vec3 capture;
   bool drawLanding = false;

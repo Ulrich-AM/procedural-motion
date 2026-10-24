@@ -267,7 +267,7 @@ void Application::drawUi(const BodyState& state) {
                                  ImGuiWindowFlags_NoCollapse;
   ImGui::Begin("lab", nullptr, flags);
   ImGui::TextUnformatted("PROCEDURAL MOTION LAB");
-  ImGui::TextUnformatted("Phase: 3 - Continuous Walking");
+  ImGui::TextUnformatted("Phase: 4 - Support Transfer");
   ImGui::Text("Simulation: %s", paused_ ? "Paused" : "Running");
   ImGui::Text("Time: %.2f s", state.time);
   ImGui::Separator();
@@ -351,6 +351,13 @@ void Application::drawUi(const BodyState& state) {
   ImGui::Text("Step Distance: %.3f", distance);
   ImGui::Text("Step Duration: %.2f", duration);
   ImGui::Text("Capture Error: %.3f", captureError);
+  ImGui::Text("Stance Foot: %s",
+              walking_ ? (locoReport_.stanceFoot.empty() ? "None" : locoReport_.stanceFoot.c_str()) : "None");
+  ImGui::Text("Left Load: %.0f   Right Load: %.0f", locoReport_.leftLoad, locoReport_.rightLoad);
+  ImGui::Text("Left Load %%: %.0f   Right Load %%: %.0f", 100.0 * locoReport_.leftFraction,
+              100.0 * locoReport_.rightFraction);
+  ImGui::Text("Support Transfer: %s", walking_ ? locoReport_.transfer.c_str() : "Quiet");
+  ImGui::Text("COM Height: %.3f", state.centerOfMass.z);
   ImGui::Text("Left Foot Contact State: %s", footContactLabel(contacts_.left().mode));
   ImGui::Text("Right Foot Contact State: %s", footContactLabel(contacts_.right().mode));
   ImGui::Text("Peak Controller Torque: %.1f Nm", active_ ? report_.peakTorque : 0.0);
@@ -370,10 +377,12 @@ void Application::drawFrame() {
   RenderFrame frame;
   frame.com = state.centerOfMass;
   frame.drawCom = true;
-  frame.drawSupport = report_.supportValid;
-  frame.support = report_.supportCenter;
   const bool showWalk = walking_ && active_;
   const bool showRecovery = recovery_ && active_ && !walking_;
+  frame.drawSupport = showWalk ? locoReport_.supportValid : report_.supportValid;
+  frame.support = showWalk ? locoReport_.support : report_.supportCenter;
+  frame.drawStance = showWalk && locoReport_.stanceSoleValid;
+  frame.stance = locoReport_.stanceSole;
   frame.drawCapture = showWalk || showRecovery;
   frame.capture = showWalk ? locoReport_.capture : recoveryReport_.capture;
   frame.drawLanding = showWalk ? locoReport_.landingValid : (showRecovery && recoveryReport_.landingValid);
