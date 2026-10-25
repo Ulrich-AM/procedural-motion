@@ -107,4 +107,17 @@ void drawSkeleton(Renderer& renderer, const ProcBody& body, const WorldPose& wor
   }
 }
 
+void drawSourceChain(Renderer& renderer, const std::vector<glm::dvec3>& positions, const std::vector<int>& parents,
+                     const glm::vec3& color, float radius) {
+  for (int index = 0; index < static_cast<int>(positions.size()); ++index) {
+    const int parent = index < static_cast<int>(parents.size()) ? parents[index] : -1;
+    if (parent >= 0 && parent < static_cast<int>(positions.size())) {
+      renderer.drawMesh(renderer.cylinder(), spanCylinder(positions[parent], positions[index], radius), color, true);
+    }
+    const glm::mat4 model =
+        glm::translate(glm::mat4(1.0f), glm::vec3(positions[index])) * glm::scale(glm::mat4(1.0f), glm::vec3(radius * 1.4f));
+    renderer.drawMesh(renderer.sphere(), model, color, true);
+  }
+}
+
 }  // namespace proc

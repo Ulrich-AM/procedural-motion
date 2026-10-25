@@ -34,6 +34,11 @@ inline glm::dquat quatNormalize(const glm::dquat& q) {
   return quatCanonical(glm::dquat(q.w / length, q.x / length, q.y / length, q.z / length));
 }
 
+inline glm::dquat quatInverse(const glm::dquat& q) {
+  const glm::dquat n = quatNormalize(q);
+  return glm::dquat(n.w, -n.x, -n.y, -n.z);
+}
+
 inline glm::dquat quatAxisAngle(const glm::dvec3& axis, double radians) {
   const glm::dvec3 a = glm::normalize(axis);
   const double half = radians * 0.5;

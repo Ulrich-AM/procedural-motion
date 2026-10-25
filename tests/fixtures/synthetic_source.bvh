@@ -1,0 +1,34 @@
+HIERARCHY
+ROOT hips
+{
+    OFFSET 0.0 0.0 0.0
+    CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation
+    JOINT thigh
+    {
+        OFFSET 0.1 0.0 -0.4
+        CHANNELS 3 Zrotation Xrotation Yrotation
+        JOINT shin
+        {
+            OFFSET 0.0 0.2 -0.5
+            CHANNELS 3 Xrotation Yrotation Zrotation
+            End Site
+            {
+                OFFSET 0.0 0.0 -0.2
+            }
+        }
+    }
+    JOINT slide
+    {
+        OFFSET 0.0 0.3 0.0
+        CHANNELS 4 Xposition Zrotation Xrotation Yrotation
+        End Site
+        {
+            OFFSET 0.0 0.0 -0.1
+        }
+    }
+}
+MOTION
+Frames: 2
+Frame Time: 0.5
+0 0 0 90 0 0 0 0 0 0 0 0 0 0 0 0
+1 2 3 0 30 0 90 90 0 10 0 0 0.25 0 0 0

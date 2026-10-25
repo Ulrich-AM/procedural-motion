@@ -6,6 +6,8 @@
 #include "render/renderer.h"
 #include "render/skeleton_renderer.h"
 #include "rig/forward_kinematics.h"
+#include "app/import_panel.h"
+#include "retarget/retargeter.h"
 #include "validation/bone_length_monitor.h"
 #include "validation/tolerances.h"
 
@@ -13,6 +15,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <commdlg.h>
+#include <shellapi.h>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -140,6 +143,7 @@ struct LabState {
   BoneLengthReport bones;
   LimitResult limits;
   bool pose_ready = false;
+  ImportSession import;
   glm::mat4 view{1.0f};
   glm::mat4 projection{1.0f};
 };
@@ -171,7 +175,9 @@ void loadBody(LabState& lab, const std::filesystem::path& path) {
   lab.body = std::move(body);
   lab.has_body = true;
   lab.target = lab.body.joints[kRootJoint].rest_position;
-  if (lab.has_motion && lab.motion.skeleton != lab.body.skeleton) {
+  if (lab.import.has_source) {
+    retargetCurrent(lab.import, lab.body, lab.motion, lab.has_motion, lab.motion_path, lab.motion_status, lab.player);
+  } else if (lab.has_motion && lab.motion.skeleton != lab.body.skeleton) {
     Status mismatch;
     mismatch.error("motion skeleton does not match the loaded body");
     lab.motion_status = mismatch;
@@ -252,6 +258,11 @@ void updatePose(LabState& lab) {
   lab.world = forwardKinematics(lab.body, lab.limits.pose);
   lab.bones = measureBoneLengths(lab.body, lab.world, kRuntimeBoneToleranceM);
   lab.pose_ready = true;
+  if (lab.import.has_source) {
+    lab.import.report.direction_max_error_deg =
+        segmentDirectionError(lab.import.clip, lab.player.time(), lab.body, lab.world, lab.import.mapping,
+                              lab.import.report.direction_worst_bone);
+  }
 }
 
 void section(const char* title) {
@@ -371,6 +382,10 @@ void drawSidePanel(LabState& lab) {
   ImGui::Checkbox("joint labels", &lab.show_joint_labels);
   ImGui::Checkbox("bone names", &lab.show_bone_labels);
   ImGui::TextWrapped("Head peg is a facing marker, not a bone. LMB orbits. Wheel zooms.");
+  const ImportResult imported = drawImportPanel(lab.import, lab.window, lab.has_body ? &lab.body : nullptr, lab.has_body,
+                                                lab.asset_root, lab.motion, lab.has_motion, lab.motion_path,
+                                                lab.motion_status, lab.player);
+  if (imported.replaced_motion) rebuildTrajectory(lab);
 }
 
 void drawTransport(LabState& lab) {
@@ -480,13 +495,39 @@ int Application::run() {
     if (count <= 0) return;
     LabState* state = labFrom(window);
     const std::filesystem::path path = pathFromUtf8(paths[0]);
-    const std::string extension = path.extension().string();
+    std::string extension = path.extension().string();
+    for (char& character : extension) {
+      if (character >= 'A' && character <= 'Z') character = static_cast<char>(character - 'A' + 'a');
+    }
     if (extension == ".procmo") loadMotion(*state, path);
-    else loadBody(*state, path);
+    else if (extension == ".bvh" || extension == ".fbx") {
+      loadDroppedSource(state->import, path, state->asset_root, state->has_body ? &state->body : nullptr, state->has_body,
+                        state->motion, state->has_motion, state->motion_path, state->motion_status, state->player);
+    } else loadBody(*state, path);
   });
 
   lab.asset_root = findAssetRoot();
   if (!lab.asset_root.empty()) loadBody(lab, lab.asset_root / "assets" / "bodies" / "neutral.procbody.json");
+  int command_count = 0;
+  LPWSTR* command = CommandLineToArgvW(GetCommandLineW(), &command_count);
+  if (command != nullptr && command_count > 1) {
+    const std::filesystem::path path(command[1]);
+    std::string extension = path.extension().string();
+    for (char& character : extension) {
+      if (character >= 'A' && character <= 'Z') character = static_cast<char>(character - 'A' + 'a');
+    }
+    if (extension == ".fbx" || extension == ".bvh") {
+      loadDroppedSource(lab.import, path, lab.asset_root, lab.has_body ? &lab.body : nullptr, lab.has_body, lab.motion,
+                        lab.has_motion, lab.motion_path, lab.motion_status, lab.player);
+      lab.import.view = ViewportMode::Overlay;
+      rebuildTrajectory(lab);
+    } else if (extension == ".procmo") {
+      loadMotion(lab, path);
+    } else {
+      loadBody(lab, path);
+    }
+  }
+  if (command != nullptr) LocalFree(command);
   lab.player.setSpeed(1.0);
   lab.player.setLoop(true);
 
@@ -510,9 +551,9 @@ int Application::run() {
     const float scale_x = window_w > 0 ? static_cast<float>(framebuffer_w) / static_cast<float>(window_w) : 1.0f;
     const float scale_y = window_h > 0 ? static_cast<float>(framebuffer_h) / static_cast<float>(window_h) : 1.0f;
     const float title_h = 34.0f;
-    const float status_h = 48.0f;
+    const float status_h = 68.0f;
     const float transport_h = 88.0f;
-    const float side_w = std::min(360.0f, static_cast<float>(window_w) * 0.34f);
+    const float side_w = std::min(420.0f, static_cast<float>(window_w) * 0.40f);
     lab.view_x = side_w;
     lab.view_y = title_h;
     lab.view_w = std::max(1.0f, static_cast<float>(window_w) - side_w);
@@ -540,11 +581,23 @@ int Application::run() {
     lab.renderer.setViewport(viewport_x, viewport_y, viewport_w, viewport_h);
     lab.renderer.setCamera(lab.view, lab.projection);
     drawGroundGrid(lab.renderer);
-    if (lab.pose_ready) {
+    const bool show_target = lab.pose_ready && (!lab.import.has_source || lab.import.view != ViewportMode::Source);
+    const bool show_source = lab.import.has_source && lab.import.view != ViewportMode::Target;
+    if (show_target) {
       SkeletonDrawOptions options;
       options.contacts = lab.has_motion ? &lab.limits.pose.contacts : nullptr;
       options.trajectory = lab.show_trajectory ? &lab.trajectory : nullptr;
       drawSkeleton(lab.renderer, lab.body, lab.world, options);
+    }
+    if (show_source) {
+      std::vector<glm::dvec3> source_positions;
+      std::vector<int> source_parents;
+      sourcePositionsAt(lab.import, lab.has_motion ? lab.player.time() : 0.0, source_positions, source_parents);
+      if (lab.import.view == ViewportMode::Overlay && lab.pose_ready && !source_positions.empty()) {
+        const glm::dvec3 shift = lab.world.joints[kRootJoint].position - source_positions[lab.import.clip.root];
+        for (glm::dvec3& position : source_positions) position += shift;
+      }
+      drawSourceChain(lab.renderer, source_positions, source_parents, glm::vec3(0.28f, 0.28f, 0.28f), 0.006f);
     }
 
     ImGui_ImplOpenGL3_NewFrame();
@@ -602,8 +655,12 @@ int Application::run() {
     const std::string violation = lab.limits.violations.empty()
                                       ? "none"
                                       : lab.limits.violations.front().joint + " (" + std::to_string(lab.limits.violations.size()) + ")";
-    ImGui::Text("frame %d | time %.3f s | max bone error %.8f m | joint violation %s | %s%s", frame, lab.player.time(),
-                lab.pose_ready ? lab.bones.max_error_m : 0.0, violation.c_str(), bone_state,
+    const char* source_name = lab.import.has_source ? lab.import.clip.name.c_str() : "none";
+    const std::string target_name = lab.has_body ? lab.body_path.filename().string() : std::string("none");
+    ImGui::Text("source %s | target %s | frame %d | bone error %.8f m | rest error %.3f deg | warnings %d", source_name,
+                target_name.c_str(), frame, lab.pose_ready ? lab.bones.max_error_m : 0.0, lab.import.report.rest_max_error_deg,
+                static_cast<int>(lab.limits.violations.size()));
+    ImGui::Text("joint violation %s | %s%s", violation.c_str(), bone_state,
                 lab.limit_mode == LimitMode::Clamp && !lab.limits.violations.empty() ? " | CLAMPED" : "");
     ImGui::End();
 

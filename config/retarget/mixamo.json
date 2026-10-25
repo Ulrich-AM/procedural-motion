@@ -1,0 +1,49 @@
+{
+  "profile": "mixamo",
+  "coordinates": {
+    "up": "+Y",
+    "forward": "+Z",
+    "unit_to_meters": 1.0
+  },
+  "detect_any": ["mixamorig"],
+  "aliases": {
+    "Hips": ["Hips", "mixamorig:Hips", "mixamorigHips"],
+    "Spine": ["Spine", "mixamorig:Spine", "mixamorigSpine"],
+    "Spine1": ["Spine1", "mixamorig:Spine1", "mixamorigSpine1"],
+    "Spine2": ["Spine2", "mixamorig:Spine2", "mixamorigSpine2"],
+    "Neck": ["Neck", "mixamorig:Neck", "mixamorigNeck"],
+    "Head": ["Head", "mixamorig:Head", "mixamorigHead"],
+    "LeftUpLeg": ["LeftUpLeg", "mixamorig:LeftUpLeg", "mixamorigLeftUpLeg"],
+    "LeftLeg": ["LeftLeg", "mixamorig:LeftLeg", "mixamorigLeftLeg"],
+    "LeftFoot": ["LeftFoot", "mixamorig:LeftFoot", "mixamorigLeftFoot"],
+    "RightUpLeg": ["RightUpLeg", "mixamorig:RightUpLeg", "mixamorigRightUpLeg"],
+    "RightLeg": ["RightLeg", "mixamorig:RightLeg", "mixamorigRightLeg"],
+    "RightFoot": ["RightFoot", "mixamorig:RightFoot", "mixamorigRightFoot"],
+    "LeftArm": ["LeftArm", "mixamorig:LeftArm", "mixamorigLeftArm"],
+    "LeftForeArm": ["LeftForeArm", "LeftForearm", "mixamorig:LeftForeArm", "mixamorigLeftForeArm"],
+    "LeftHand": ["LeftHand", "mixamorig:LeftHand", "mixamorigLeftHand"],
+    "RightArm": ["RightArm", "mixamorig:RightArm", "mixamorigRightArm"],
+    "RightForeArm": ["RightForeArm", "RightForearm", "mixamorig:RightForeArm", "mixamorigRightForeArm"],
+    "RightHand": ["RightHand", "mixamorig:RightHand", "mixamorigRightHand"]
+  },
+  "target_to_source": {
+    "legrootj": "Hips",
+    "spine1j": "Spine",
+    "spine2j": "Spine1",
+    "armrootj": "Spine2",
+    "neckj": "Neck",
+    "headj": "Head",
+    "lleguppj": "LeftUpLeg",
+    "lleglowj": "LeftLeg",
+    "lfootj": "LeftFoot",
+    "rleguppj": "RightUpLeg",
+    "rleglowj": "RightLeg",
+    "rfootj": "RightFoot",
+    "larmuppj": "LeftArm",
+    "larmlowj": "LeftForeArm",
+    "lhandj": "LeftHand",
+    "rarmuppj": "RightArm",
+    "rarmlowj": "RightForeArm",
+    "rhandj": "RightHand"
+  }
+}

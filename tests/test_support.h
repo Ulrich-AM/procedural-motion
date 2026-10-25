@@ -17,3 +17,6 @@ struct TestStats {
 int runBodyTests();
 int runFkTests();
 int runMotionTests();
+int runBvhTests();
+int runRetargetTests();
+int runImportTests();

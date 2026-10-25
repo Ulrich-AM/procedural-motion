@@ -27,9 +27,13 @@ Makefile
 *.dll
 *.lib
 
-# Local datasets / licensed assets
+# Local datasets / licensed assets. Synthetic fixtures under tests/fixtures stay tracked.
 datasets/
 local_assets/
+converted/
+imports/
 *.fbx
 *.bvh
 *.npz
+!tests/fixtures/*.fbx
+!tests/fixtures/*.bvh

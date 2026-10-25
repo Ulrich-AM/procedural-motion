@@ -16,5 +16,7 @@ struct SkeletonDrawOptions {
 
 void drawGroundGrid(Renderer& renderer);
 void drawSkeleton(Renderer& renderer, const ProcBody& body, const WorldPose& world, const SkeletonDrawOptions& options);
+void drawSourceChain(Renderer& renderer, const std::vector<glm::dvec3>& positions, const std::vector<int>& parents,
+                     const glm::vec3& color, float radius);
 
 }  // namespace proc

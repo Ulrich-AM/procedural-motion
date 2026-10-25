@@ -1,0 +1,37 @@
+{
+  "profile": "lafan1",
+  "coordinates": {
+    "up": "+Y",
+    "forward": "+Z",
+    "unit_to_meters": 0.01
+  },
+  "detect_none": ["mixamorig"],
+  "aliases": {
+    "LeftForeArm": ["LeftForeArm", "LeftForearm"],
+    "RightForeArm": ["RightForeArm", "RightForearm"],
+    "LeftUpLeg": ["LeftUpLeg", "LeftUpperLeg"],
+    "RightUpLeg": ["RightUpLeg", "RightUpperLeg"],
+    "Spine1": ["Spine1", "Chest"],
+    "Spine2": ["Spine2", "Chest1", "UpperChest"]
+  },
+  "target_to_source": {
+    "legrootj": "Hips",
+    "spine1j": "Spine",
+    "spine2j": "Spine1",
+    "armrootj": "Spine2",
+    "neckj": "Neck",
+    "headj": "Head",
+    "lleguppj": "LeftUpLeg",
+    "lleglowj": "LeftLeg",
+    "lfootj": "LeftFoot",
+    "rleguppj": "RightUpLeg",
+    "rleglowj": "RightLeg",
+    "rfootj": "RightFoot",
+    "larmuppj": "LeftArm",
+    "larmlowj": "LeftForeArm",
+    "lhandj": "LeftHand",
+    "rarmuppj": "RightArm",
+    "rarmlowj": "RightForeArm",
+    "rhandj": "RightHand"
+  }
+}

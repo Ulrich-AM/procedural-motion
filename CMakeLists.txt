@@ -28,6 +28,11 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/ocornut/imgui.git
   GIT_TAG v1.91.8
   GIT_SHALLOW TRUE)
+FetchContent_Declare(
+  assimp
+  GIT_REPOSITORY https://github.com/assimp/assimp.git
+  GIT_TAG v5.4.3
+  GIT_SHALLOW TRUE)
 
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -35,8 +40,18 @@ set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
 set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
 set(GLM_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ALL_EXPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_FBX_IMPORTER ON CACHE BOOL "" FORCE)
+set(ASSIMP_NO_EXPORT ON CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
-FetchContent_MakeAvailable(glfw glm nlohmann_json)
+FetchContent_MakeAvailable(glfw glm nlohmann_json assimp)
 
 # ImGui does not ship a CMake project. Populate the sources and compile
 # only the files this lab uses.
@@ -56,9 +71,17 @@ add_library(proc_core STATIC
   src/rig/forward_kinematics.cpp
   src/validation/skeleton_validator.cpp
   src/validation/motion_validator.cpp
-  src/validation/bone_length_monitor.cpp)
+  src/validation/bone_length_monitor.cpp
+  src/motion/proc_motion_save.cpp
+  src/import/source_motion.cpp
+  src/import/coordinate_normalizer.cpp
+  src/import/bvh_importer.cpp
+  src/import/fbx_importer.cpp
+  src/retarget/retarget_profile.cpp
+  src/retarget/retargeter.cpp
+  src/retarget/retarget_diagnostics.cpp)
 target_include_directories(proc_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(proc_core PUBLIC glm::glm nlohmann_json::nlohmann_json)
+target_link_libraries(proc_core PUBLIC glm::glm nlohmann_json::nlohmann_json assimp::assimp)
 if(MSVC)
   target_compile_options(proc_core PRIVATE /W4 /permissive-)
   target_compile_definitions(proc_core PRIVATE NOMINMAX)
@@ -79,9 +102,10 @@ target_link_libraries(imgui_lib PUBLIC glfw)
 add_executable(proc_motion_lab
   src/main.cpp
   src/app/application.cpp
+  src/app/import_panel.cpp
   src/render/renderer.cpp
   src/render/skeleton_renderer.cpp)
-target_link_libraries(proc_motion_lab PRIVATE proc_core imgui_lib glfw opengl32 comdlg32)
+target_link_libraries(proc_motion_lab PRIVATE proc_core imgui_lib glfw opengl32 comdlg32 shell32)
 if(MSVC)
   target_compile_options(proc_motion_lab PRIVATE /W4 /permissive-)
   target_compile_definitions(proc_motion_lab PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
@@ -93,7 +117,10 @@ add_executable(proc_motion_tests
   tests/test_main.cpp
   tests/body_tests.cpp
   tests/fk_tests.cpp
-  tests/motion_tests.cpp)
+  tests/motion_tests.cpp
+  tests/bvh_tests.cpp
+  tests/retarget_tests.cpp
+  tests/import_tests.cpp)
 target_link_libraries(proc_motion_tests PRIVATE proc_core)
 target_compile_definitions(proc_motion_tests PRIVATE PROCMOTION_SOURCE_DIR="${PROCMOTION_SOURCE_DIR_FWD}")
 if(MSVC)

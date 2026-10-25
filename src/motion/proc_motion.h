@@ -55,5 +55,7 @@ struct ProcMotion {
 
 Status loadProcMotionFromString(std::string_view json_text, ProcMotion& out, std::string_view label = "motion");
 Status loadProcMotionFromFile(const std::filesystem::path& path, ProcMotion& out);
+std::string writeProcMotionToString(const ProcMotion& motion);
+Status writeProcMotionToFile(const ProcMotion& motion, const std::filesystem::path& path);
 
 }  // namespace proc

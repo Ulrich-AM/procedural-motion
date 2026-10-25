@@ -20,7 +20,7 @@ Right-handed.
 - `+Y` is the character's forward
 - `+Z` is up
 
-Internal units are meters. Quaternions are stored as `[x, y, z, w]`. The bind pose is a T-pose. Future importers convert their source coordinates into this convention before anything is saved as a PROC BODY or a `.procmo`.
+Internal units are meters. Quaternions are stored as `[x, y, z, w]`. The bind pose is a T-pose. Importers convert their source coordinates into this convention before a clip is retargeted or saved as a `.procmo`.
 
 ## Canonical skeleton
 
@@ -149,7 +149,7 @@ All five clips are hand-authored. None of them is imported mocap.
 
 ## Build
 
-Requirements: Windows, CMake, and Visual Studio with the C++ workload. The first configure downloads GLFW, GLM, Dear ImGui, and nlohmann/json.
+Requirements: Windows, CMake, and Visual Studio with the C++ workload. The first configure downloads GLFW, GLM, Dear ImGui, nlohmann/json, and Assimp 5.4.3. Assimp is built as a static FBX importer only.
 
 ```text
 build_windows.bat
@@ -171,7 +171,7 @@ ctest --test-dir build -C Release
 
 Passing a `.procbody.json` path to the test executable loads that file and prints the body name, or prints the validation errors.
 
-On startup the lab loads `assets/bodies/neutral.procbody.json` when it can find `assets` by walking up from the working directory or from the executable.
+On startup the lab loads `assets/bodies/neutral.procbody.json` when it can find `assets` by walking up from the working directory or from the executable. A `.fbx` or `.bvh` path on the command line is imported after that and shown in the overlay view. A `.procmo` path is loaded as motion. Another path is loaded as a body.
 
 ## Controls
 
@@ -179,14 +179,14 @@ The window is a compact research tool: Arial, grayscale, sharp corners, a dark v
 
 - Left mouse drag in the viewport orbits. The wheel zooms.
 - Front, Side, 3/4, and Reset camera.
-- Load or reload a `.procbody.json` and a `.procmo`. Dropping a `.procmo` loads motion. Dropping other JSON loads a body.
+- Load or reload a `.procbody.json` and a `.procmo`. Dropping a `.procmo` loads motion. Dropping a `.fbx` or `.bvh` imports source motion. Dropping other JSON loads a body.
 - Transport: jump to start, previous source frame, play/pause, next source frame, jump to end. Space toggles play.
 - Timeline scrubber, loop toggle, and speeds 0.25×, 0.5×, 1×, 2×.
 - Joint limits: WARN or CLAMP.
 - Optional root trajectory. Foot contacts draw as discs. A heel marker is drawn at the foot joint because this skeleton has no heel bone. A toe marker is drawn at the toe joint. White means contact, dark means explicitly open, and a missing contact is not drawn.
 - A short peg on the head points along local `+Y`. It is a facing marker, not a bone.
 
-The status line shows frame, time, max bone-length error, whether a joint limit was violated, and PASS or FAIL.
+The status line shows the source clip, the target body, frame, bone-length error, rest-retarget error, joint-limit warnings, and PASS or FAIL.
 
 ## Validation
 
@@ -211,12 +211,107 @@ Failures are reported as text. The process does not abort.
 - loading the same body and motion twice yields the same sampled positions
 - all five clips, sampled under both WARN and CLAMP, keep every bone length
 
+## Phase 2 — motion import and bone-preserving retargeting
+
+Phase 2 imports a foreign humanoid clip, reconstructs that clip's own rest pose and animated transforms, and writes a `.procmo`. The PROC BODY still owns bone lengths. A source thigh of 0.47 m retargeted onto a PROC thigh of 0.39 m copies the source thigh's orientation onto the target hip and keeps the target's 0.39 m bone. The target knee is not moved to the source knee. If the target foot does not land where the source foot landed, that is expected. Foot correction is not part of this phase.
+
+```text
+Mixamo FBX ─┐
+            ├─> SourceClip ─> Retargeter ─> ProcMotion ─> .procmo ─> any PROC BODY
+LAFAN1 BVH ─┘
+```
+
+FBX and BVH never write a `ProcMotion` directly. The retargeter does not contain Mixamo, FBX, or BVH coordinate branches. Each importer finishes in the PROC convention: right-handed, +X right, +Y forward, +Z up, meters, quaternions.
+
+`SourceClip` stores, for every source joint, the rest local and rest global transform, and for every frame the animated local and global transform. Non-root source translations stay in the clip so the source skeleton can be previewed. They are logged and are not written into `.procmo`.
+
+### BVH
+
+`src/import/bvh_importer.cpp` is a native parser. It reads `HIERARCHY`, `ROOT`, `JOINT`, `End Site`, `OFFSET`, `CHANNELS`, `MOTION`, `Frames`, and `Frame Time`. Rotation channels are applied in the order the file declares and converted to quaternions immediately. Downstream code does not see the original Euler order. A position channel replaces the corresponding component of `OFFSET`. It is not added on top of the offset.
+
+### FBX
+
+FBX is read with Assimp. The importer keeps the node hierarchy, rest transforms, translation keys, rotation keys, and timing. Meshes, materials, textures, skin weights, and blend shapes are ignored. If the rest pose extends past 10 units on any axis, translations are treated as centimeters and scaled to meters inside the FBX importer. A retarget profile can still name the file's up and forward axes. Local FBX quaternions are not copied into PROC.
+
+### Bind-relative retarget
+
+For a mapped source joint `j`:
+
+```text
+D(j) = animated_global(j) * inverse(rest_global(j))
+target_global(j) = D(j) * target_rest_global(j)
+target_local(j) = inverse(target_global(parent)) * target_global(j)
+```
+
+`target_local` is what `.procmo` stores. The target rest basis comes from forward kinematics of the loaded body, so the math does not assume that basis is identity. A PROC joint with no source mapping inherits its parent's desired global rotation. That lets `larmuppj` take the global rotational delta of Mixamo `LeftArm` without adding a clavicle to `proc_humanoid_v0`. The source arm's global orientation already includes the shoulder ancestors.
+
+### Profiles and mapping
+
+`config/retarget/mixamo.json` and `config/retarget/lafan1.json` map PROC joint names to source semantic names, with aliases. `mixamorig:` is stripped for matching and the original source name is kept. A profile is selected only when every required mapping is present. Mixamo detection also requires a `mixamorig` token, so a bare LAFAN skeleton is not labeled Mixamo. The lab can auto-detect, load a profile, edit each PROC joint from a source-joint list, save a custom mapping JSON, and reset the mapping. A different humanoid does not require a C++ change.
+
+Before the animation is trusted, the source rest pose is retargeted and compared with the PROC rest pose. The panel reports each mapped joint's angular error and the maximum. A large rest error, such as a sideways knee or a twisted shoulder, is a mapping or basis problem.
+
+### Root motion and export
+
+Root translation is the source root's animated position minus its rest position, in meters, after the importer's coordinate conversion. It is not scaled to the target's height or leg length. Two preview options exist and start off: rebase the horizontal start to the origin, and rebase the initial facing direction to +Y. Exported `.procmo` files use `PROC_MOTION` version 1: source metadata, timing, root translation, root rotation, and local joint rotations. No bone positions, no non-root translation, no scale, and no bone lengths. Joint-limit CLAMP affects the preview only. The file keeps the raw retarget so a second body can clamp the same clip with its own limits. Contacts are omitted unless a future source actually provides them. A missing contact stays unknown. The importer does not write `false`.
+
+### Viewer
+
+The viewport is TARGET, SOURCE, or OVERLAY. TARGET draws the PROC skeleton. SOURCE draws the imported skeleton at its own proportions. OVERLAY shifts the source root onto the PROC root and draws the source as a thinner, darker chain under the thicker PROC skeleton. The shift is a translation. It does not rotate the source, so an axis error stays visible. There is no mesh and no IK.
+
+The source panel shows filename, format, clip name, duration, nominal FPS, joint count, root, detected units, coordinate conversion, profile, mapped and unmapped joints, animated translation notes, and a hierarchy browser. Diagnostics include required mappings, rest angular error, bone-length validation, joint-limit warnings, source translation notes, and `PROC non-root translations exported: 0`. A segment-direction error compares source and target bone directions and ignores length, so a proportion difference is not reported as an orientation error.
+
+### Local Mixamo and LAFAN1
+
+Third-party files stay on the machine that owns the license. The repository does not contain Mixamo FBX, LAFAN1 BVH, AMASS, SMPL, or converted third-party `.procmo` files. `datasets/`, `local_assets/`, `converted/`, `imports/`, `*.fbx`, and `*.bvh` are ignored, except the synthetic fixtures under `tests/fixtures/`.
+
+Mixamo:
+
+```text
+download an FBX locally
+drop it on the lab, or use Load FBX/BVH
+confirm the profile reads Mixamo and the required mapping is complete
+inspect TARGET, SOURCE, and OVERLAY
+export .procmo if you want a file
+```
+
+LAFAN1:
+
+```text
+point the lab at a local .bvh
+the BVH importer and config/retarget/lafan1.json do the rest
+preview, then export a .procmo only if you need one outside the repository
+```
+
+The LAFAN profile treats the file as Y-up, +Z forward, centimeters. That axis choice has not been checked against a local LAFAN clip. The Mixamo profile treats Assimp's node axes as Y-up, +Z forward, and leaves the unit scale at 1 because the FBX importer already converts a centimeter-sized file. The right axis is not stored separately. It is `forward × up`, which keeps the frame right-handed (`right × forward = up`). On the local Mixamo character that puts character right on -X, the left arm on -X, and the legs down -Z. If a real file disagrees, fix the profile's `coordinates` block. Do not add a special case inside the retargeter.
+
+### Expected limitations
+
+These are part of Phase 2, not defects to hide:
+
+- Feet can slide. There is no foot IK and no foot lock.
+- Contacts are not inferred.
+- A shorter or longer PROC leg will not reproduce the source stride length.
+- Root travel is the source's metric travel. It is not scaled to the target.
+- Joint limits are still the Phase 1 placeholders.
+- There is no mesh, no AMASS importer, and no procedural locomotion.
+
+## Phase 2 tests
+
+`proc_motion_tests` also covers:
+
+- `tests/fixtures/synthetic_source.bvh` parses hierarchy, offsets, root translation, a non-XYZ channel order, an animated non-root position, and the expected quaternions
+- a synthetic source with a twisted hip rest retargets to the anatomical PROC rotation rather than a copy of the source local quaternion
+- one `.procmo` played on the neutral body and on a body with shorter thighs and wider hips keeps the same local rotations, moves the knee in world space, and preserves each body's own bone lengths
+- writing a retargeted `.procmo` and loading it again matches root transforms and joint rotations
+- the Mixamo profile matches a `mixamorig:` skeleton, and the synthetic FBX fixture imports to a `SourceClip`
+
 ## Non-goals
 
-Phase 1 does not implement, and does not add scaffolding for, MuJoCo, Box2D, rigid-body physics, balance or stepping controllers, SIMBICON, procedural walking, active ragdoll, IK locomotion, FBX, BVH, Mixamo, LAFAN1, AMASS, SMPL, video pose detection, MediaPipe, machine learning, mesh skinning, a Y-Bot mesh, or auto-rigging.
+This tree does not implement MuJoCo, Box2D, rigid-body physics, balance or stepping controllers, SIMBICON, procedural walking, gait-cycle segmentation, automatic contact detection, foot IK, foot locking, terrain adaptation, a motion-matching database, active ragdoll, AMASS, SMPL, video pose detection, MediaPipe, machine learning, mesh skinning, a Y-Bot mesh, or auto-rigging.
 
 ## Roadmap
 
-Phase 2 is motion import and bone-preserving retargeting: Mixamo FBX, BVH, and LAFAN1. An importer converts the source into this coordinate system and writes local rotations onto `proc_humanoid_v0`. It does not copy source bone lengths onto the target body.
+Phase 3 is dataset indexing, motion classification, foot-contact detection, gait-cycle segmentation, phase normalization, and locomotion measurements: joint and pelvis curves, and speed, stride, and cadence. It is not started here.
 
-Later work, after that, can cover AMASS conversion, motion analysis, gait-cycle extraction, reference-derived procedural locomotion, different body proportions, physical compliance, a disturbance and reaction layer, and an active ragdoll. None of that is in this tree.
+Later work can cover AMASS conversion, reference-derived procedural locomotion, physical compliance, a disturbance and reaction layer, and an active ragdoll.
