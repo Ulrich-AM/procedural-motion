@@ -113,4 +113,6 @@ WARN is the lab default. It reports a violation and leaves the requested pose un
 
 Hinge sign follows the axis stored on the PROC BODY. On the canonical skeleton both knees use `+X`, and negative rotation about that axis is flexion. Elbow axes point in opposite directions, so the same numeric quaternion sign is not assumed for both sides. The stored ranges are placeholders.
 
+In-place preview, phase scrubbing, and quarter-cycle ghosts live in the lab. They copy a pose or a state for drawing. They do not change `LocomotionState.root_position`, the baked motion, or the slip sample. The synthetic walk, run, and sprint templates are offline curve contents in the same `PROC_LOCOMOTION_MODEL` v1 file. Run and sprint are not scaled copies of the walk. Their phase keys are synthetic modeling values. Foot slip stays a measurement.
+
 The GUI import panel and the batch analyzer still each load and retarget a clip. They share the mapping and `SourceSemanticMap`. A single `processSourceMotion` helper is not worth a rewrite of the import UI. The lab separates PLAYBACK from GENERATOR so those controls stay apart.

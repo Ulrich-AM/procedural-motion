@@ -24,6 +24,8 @@ struct GeneratorUi {
   bool playing = false;
   int force = 0;
   int inspect = 0;
+  bool in_place = true;
+  bool show_ghosts = false;
   float desired_speed = 1.2f;
   float acceleration = 2.5f;
   float heading_deg = 0.0f;

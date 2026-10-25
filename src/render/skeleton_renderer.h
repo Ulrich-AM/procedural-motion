@@ -12,6 +12,7 @@ struct SkeletonDrawOptions {
   const ContactSample* contacts = nullptr;
   const std::vector<glm::vec3>* trajectory = nullptr;
   bool draw_facing_marker = true;
+  float shade = 1.0f;
 };
 
 void drawGroundGrid(Renderer& renderer);

@@ -1,4 +1,5 @@
 #include "app/generator_panel.h"
+#include "app/generator_preview.h"
 
 #include "locomotion/body_scale.h"
 #include "locomotion/locomotion_model_io.h"
@@ -55,34 +56,62 @@ std::filesystem::path saveMotionDialog(GLFWwindow* window) {
   return std::filesystem::path(buffer);
 }
 
-void plotCurve(const char* label, const std::vector<double>& values) {
+void plotSeries(const char* label, const std::vector<std::vector<double>>& series, const std::vector<ImU32>& colors) {
   ImDrawList* draw = ImGui::GetWindowDrawList();
   const ImVec2 origin = ImGui::GetCursorScreenPos();
   const float width = std::max(40.0f, ImGui::GetContentRegionAvail().x);
-  const float height = 64.0f;
+  const float height = 72.0f;
   ImGui::InvisibleButton(label, ImVec2(width, height));
   draw->AddRectFilled(origin, ImVec2(origin.x + width, origin.y + height), IM_COL32(18, 18, 18, 255));
   draw->AddRect(origin, ImVec2(origin.x + width, origin.y + height), IM_COL32(90, 90, 90, 255));
-  if (values.size() >= 2) {
-    double min_value = values.front();
-    double max_value = values.front();
+  double min_value = 0.0;
+  double max_value = 1.0;
+  bool any = false;
+  for (const std::vector<double>& values : series) {
     for (double value : values) {
+      if (!any) {
+        min_value = max_value = value;
+        any = true;
+      }
       min_value = std::min(min_value, value);
       max_value = std::max(max_value, value);
     }
-    if (std::abs(max_value - min_value) < 1e-6) max_value = min_value + 1.0;
+  }
+  if (std::abs(max_value - min_value) < 1e-6) max_value = min_value + 1.0;
+  for (std::size_t series_index = 0; series_index < series.size(); ++series_index) {
+    const std::vector<double>& values = series[series_index];
+    if (values.size() < 2) continue;
+    const ImU32 color = series_index < colors.size() ? colors[series_index] : IM_COL32(210, 210, 210, 255);
+    const float thickness = series_index == 0 ? 1.6f : 1.1f;
     for (std::size_t index = 1; index < values.size(); ++index) {
       const float x0 = origin.x + width * static_cast<float>(index - 1) / static_cast<float>(values.size() - 1);
       const float x1 = origin.x + width * static_cast<float>(index) / static_cast<float>(values.size() - 1);
       const float y0 = origin.y + height - static_cast<float>((values[index - 1] - min_value) / (max_value - min_value)) * (height - 4.0f) - 2.0f;
       const float y1 = origin.y + height - static_cast<float>((values[index] - min_value) / (max_value - min_value)) * (height - 4.0f) - 2.0f;
-      draw->AddLine(ImVec2(x0, y0), ImVec2(x1, y1), IM_COL32(210, 210, 210, 255), 1.0f);
+      if (series_index == 1 && (index % 3) == 0) continue;
+      if (series_index == 2 && (index % 2) == 0) continue;
+      draw->AddLine(ImVec2(x0, y0), ImVec2(x1, y1), color, thickness);
     }
-    const float x_wrap = origin.x;
-    const float y_wrap = origin.y + height - static_cast<float>((values.front() - min_value) / (max_value - min_value)) * (height - 4.0f) - 2.0f;
-    const float x_last = origin.x + width;
-    const float y_last = origin.y + height - static_cast<float>((values.back() - min_value) / (max_value - min_value)) * (height - 4.0f) - 2.0f;
-    draw->AddLine(ImVec2(x_last, y_last), ImVec2(x_wrap + width, y_wrap), IM_COL32(140, 140, 140, 180), 1.0f);
+  }
+  ImGui::TextUnformatted(label);
+}
+
+void plotCurve(const char* label, const std::vector<double>& values) {
+  plotSeries(label, {values}, {IM_COL32(210, 210, 210, 255)});
+}
+
+void supportBar(const char* label, const std::array<double, kLocoPhaseSamples>& values, ImU32 color) {
+  ImDrawList* draw = ImGui::GetWindowDrawList();
+  const ImVec2 origin = ImGui::GetCursorScreenPos();
+  const float width = std::max(40.0f, ImGui::GetContentRegionAvail().x);
+  const float height = 14.0f;
+  ImGui::InvisibleButton(label, ImVec2(width, height));
+  draw->AddRectFilled(origin, ImVec2(origin.x + width, origin.y + height), IM_COL32(18, 18, 18, 255));
+  const float cell = width / static_cast<float>(kLocoPhaseSamples);
+  for (int index = 0; index < kLocoPhaseSamples; ++index) {
+    if (values[static_cast<std::size_t>(index)] < 0.5) continue;
+    const float x = origin.x + cell * static_cast<float>(index);
+    draw->AddRectFilled(ImVec2(x, origin.y + 1.0f), ImVec2(x + std::max(cell, 1.0f), origin.y + height - 1.0f), color);
   }
   ImGui::TextUnformatted(label);
 }
@@ -184,6 +213,24 @@ void drawGeneratorPanel(GeneratorUi& ui, GLFWwindow* window, const ProcBody* bod
   ImGui::RadioButton("RUN", &ui.force, 2);
   ImGui::SameLine();
   ImGui::RadioButton("SPRINT", &ui.force, 3);
+  ImGui::Checkbox("IN-PLACE PREVIEW", &ui.in_place);
+  ImGui::SameLine();
+  ImGui::Checkbox("GHOST POSES", &ui.show_ghosts);
+  if (!ui.playing) {
+    float phase = static_cast<float>(ui.state.phase);
+    if (ImGui::SliderFloat("PHASE", &phase, 0.0f, 1.0f, "%.3f")) ui.state.phase = wrapPhase(phase >= 0.999f ? 0.0 : phase);
+    if (ImGui::Button("-0.01")) ui.state.phase = wrapPhase(ui.state.phase - 0.01);
+    ImGui::SameLine();
+    if (ImGui::Button("+0.01")) ui.state.phase = wrapPhase(ui.state.phase + 0.01);
+    ImGui::SameLine();
+    if (ImGui::Button("0.00")) ui.state.phase = 0.0;
+    ImGui::SameLine();
+    if (ImGui::Button("0.25")) ui.state.phase = 0.25;
+    ImGui::SameLine();
+    if (ImGui::Button("0.50")) ui.state.phase = 0.50;
+    ImGui::SameLine();
+    if (ImGui::Button("0.75")) ui.state.phase = 0.75;
+  }
   ImGui::SliderFloat("desired m/s", &ui.desired_speed, 0.0f, 8.0f, "%.2f");
   ImGui::SliderFloat("accel m/s2", &ui.acceleration, 0.1f, 8.0f, "%.2f");
   ImGui::SliderFloat("heading deg", &ui.heading_deg, -180.0f, 180.0f, "%.1f");
@@ -257,6 +304,64 @@ void drawGeneratorPanel(GeneratorUi& ui, GLFWwindow* window, const ProcBody* bod
     }
   }
   if (!ui.bake_status.empty()) ImGui::TextWrapped("%s", ui.bake_status.c_str());
+
+  auto channelOf = [](const SpeedKnot& knot, LocoChannel channel) {
+    std::vector<double> values;
+    values.reserve(kLocoPhaseSamples);
+    for (int sample = 0; sample < kLocoPhaseSamples; ++sample) {
+      values.push_back(knot.rotation[static_cast<int>(channel)][static_cast<std::size_t>(sample)].x);
+    }
+    return values;
+  };
+  const SpeedKnot* walk_knot = ui.model.walk.knots.empty() ? nullptr : &ui.model.walk.knots[ui.model.walk.knots.size() / 2];
+  const SpeedKnot* run_knot = ui.model.run.knots.empty() ? nullptr : &ui.model.run.knots[ui.model.run.knots.size() / 2];
+  const SpeedKnot* sprint_knot = ui.model.sprint.knots.empty() ? nullptr : &ui.model.sprint.knots[ui.model.sprint.knots.size() / 2];
+  auto compare = [&](const char* label, LocoChannel channel) {
+    std::vector<std::vector<double>> series;
+    if (walk_knot != nullptr) series.push_back(channelOf(*walk_knot, channel));
+    if (run_knot != nullptr) series.push_back(channelOf(*run_knot, channel));
+    if (sprint_knot != nullptr) series.push_back(channelOf(*sprint_knot, channel));
+    plotSeries(label, series, {IM_COL32(230, 230, 230, 255), IM_COL32(170, 170, 170, 255), IM_COL32(110, 110, 110, 255)});
+  };
+  ImGui::TextUnformatted("COMPARE  walk solid   run broken   sprint dotted");
+  compare("hip log x  walk / run / sprint", LocoChannel::LeftHip);
+  compare("knee log x  walk / run / sprint", LocoChannel::LeftKnee);
+  compare("ankle log x  walk / run / sprint", LocoChannel::LeftAnkle);
+  const SpeedKnot* support_knot = inspected(ui) != nullptr && !inspected(ui)->knots.empty()
+                                      ? &inspected(ui)->knots[inspected(ui)->knots.size() / 2]
+                                      : nullptr;
+  if (support_knot != nullptr) {
+    supportBar("LEFT support", support_knot->contact_left_heel, IM_COL32(210, 210, 210, 255));
+    supportBar("RIGHT support", support_knot->contact_right_heel, IM_COL32(150, 150, 150, 255));
+    std::array<double, kLocoPhaseSamples> flight{};
+    int flight_count = 0;
+    int double_count = 0;
+    for (int sample = 0; sample < kLocoPhaseSamples; ++sample) {
+      const bool left = support_knot->contact_left_heel[static_cast<std::size_t>(sample)] >= 0.5;
+      const bool right = support_knot->contact_right_heel[static_cast<std::size_t>(sample)] >= 0.5;
+      flight[static_cast<std::size_t>(sample)] = (!left && !right) ? 1.0 : 0.0;
+      if (!left && !right) ++flight_count;
+      if (left && right) ++double_count;
+    }
+    supportBar("FLIGHT", flight, IM_COL32(120, 120, 120, 255));
+    ImGui::Text("single / double / flight samples  %d / %d / %d", kLocoPhaseSamples - flight_count - double_count, double_count,
+                flight_count);
+    int toe_off = -1;
+    int opposite = -1;
+    for (int sample = 1; sample < kLocoPhaseSamples; ++sample) {
+      const double previous = support_knot->contact_left_heel[static_cast<std::size_t>(sample - 1)];
+      const double current = support_knot->contact_left_heel[static_cast<std::size_t>(sample)];
+      if (toe_off < 0 && previous >= 0.5 && current < 0.5) toe_off = sample;
+      const double right_previous = support_knot->contact_right_heel[static_cast<std::size_t>(sample - 1)];
+      const double right_current = support_knot->contact_right_heel[static_cast<std::size_t>(sample)];
+      if (opposite < 0 && right_previous < 0.5 && right_current >= 0.5) opposite = sample;
+    }
+    if (support_knot->contact_left_heel[0] >= 0.5) {
+      ImGui::Text("reference IC 0.00");
+      if (toe_off >= 0) ImGui::Text("toe-off %.2f", static_cast<double>(toe_off) / static_cast<double>(kLocoPhaseSamples));
+      if (opposite >= 0) ImGui::Text("opposite contact %.2f", static_cast<double>(opposite) / static_cast<double>(kLocoPhaseSamples));
+    }
+  }
 
   ImGui::RadioButton("inspect walk", &ui.inspect, 0);
   ImGui::SameLine();

@@ -66,21 +66,24 @@ void drawGroundGrid(Renderer& renderer) {
 }
 
 void drawSkeleton(Renderer& renderer, const ProcBody& body, const WorldPose& world, const SkeletonDrawOptions& options) {
+  const float shade = std::clamp(options.shade, 0.05f, 1.0f);
+  const float thin = shade < 0.99f ? 0.72f : 1.0f;
   for (const BoneGeom& bone : body.bones) {
     const glm::mat4 model = spanCylinder(world.joints[bone.parent_joint].position, world.joints[bone.child_joint].position,
-                                         bone.name.find("hand") != std::string::npos || bone.name.find("foot") != std::string::npos
-                                             ? 0.010f
-                                             : 0.013f);
-    renderer.drawMesh(renderer.cylinder(), model, boneColor(bone.name), true);
+                                         (bone.name.find("hand") != std::string::npos || bone.name.find("foot") != std::string::npos
+                                              ? 0.010f
+                                              : 0.013f) *
+                                             thin);
+    renderer.drawMesh(renderer.cylinder(), model, boneColor(bone.name) * shade, true);
   }
   for (int index = 0; index < kJointCount; ++index) {
     const glm::dvec3& position = world.joints[index].position;
-    const float radius = index == kRootJoint ? 0.030f : 0.020f;
+    const float radius = (index == kRootJoint ? 0.030f : 0.020f) * thin;
     const glm::mat4 model =
         glm::translate(glm::mat4(1.0f), glm::vec3(static_cast<float>(position.x), static_cast<float>(position.y),
                                                    static_cast<float>(position.z))) *
         glm::scale(glm::mat4(1.0f), glm::vec3(radius));
-    renderer.drawMesh(renderer.sphere(), model, index == kRootJoint ? gray(0.95f) : gray(0.88f), true);
+    renderer.drawMesh(renderer.sphere(), model, (index == kRootJoint ? gray(0.95f) : gray(0.88f)) * shade, true);
   }
 
   if (options.draw_facing_marker) {

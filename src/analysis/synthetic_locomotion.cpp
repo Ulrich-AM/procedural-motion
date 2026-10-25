@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace proc {
 namespace {
@@ -14,7 +15,16 @@ namespace {
 const glm::dvec3 kX(1.0, 0.0, 0.0);
 constexpr double kPi = 3.14159265358979323846;
 
+// Synthetic modeling values, not measurements.
+// Relative structure follows published gait trends: walking has the longest
+// stance and no flight (Perry and Burnfield; Novacheck 1998), running drops
+// below 50% stance and adds absorption plus a flight interval (Novacheck 1998;
+// Mann and Hagy 1980), and sprinting shortens stance further with a faster
+// recovery and a late-swing extension before contact. The numbers below are
+// conservative synthetic approximations of that organization.
+
 struct GaitStyle {
+  std::string regime = "walk";
   double knee_flex = 0.90;
   double ankle_dorsi = 0.26;
   double ankle_plantar = 0.38;
@@ -28,26 +38,21 @@ struct GaitStyle {
 
 GaitStyle styleFor(const std::string& regime) {
   GaitStyle style;
+  style.regime = regime;
   if (regime == "run") {
-    style.knee_flex = 1.20;
-    style.ankle_dorsi = 0.32;
-    style.ankle_plantar = 0.48;
-    style.arm_swing = 0.46;
-    style.elbow_flex = 0.72;
-    style.elbow_mod = 0.16;
+    style.arm_swing = 0.50;
+    style.elbow_flex = 0.82;
+    style.elbow_mod = 0.14;
     style.pelvis_pitch = 0.07;
-    style.pelvis_roll = 0.035;
+    style.pelvis_roll = 0.03;
     style.spine_yaw = 0.09;
   } else if (regime == "sprint") {
-    style.knee_flex = 1.50;
-    style.ankle_dorsi = 0.36;
-    style.ankle_plantar = 0.55;
-    style.arm_swing = 0.58;
-    style.elbow_flex = 0.95;
-    style.elbow_mod = 0.18;
+    style.arm_swing = 0.62;
+    style.elbow_flex = 1.02;
+    style.elbow_mod = 0.12;
     style.pelvis_pitch = 0.08;
-    style.pelvis_roll = 0.04;
-    style.spine_yaw = 0.11;
+    style.pelvis_roll = 0.035;
+    style.spine_yaw = 0.10;
   }
   return style;
 }
@@ -105,8 +110,76 @@ double ankleAngle(double phase, double stance, const GaitStyle& style) {
   return style.ankle_dorsi * 0.55 * (1.0 - blend);
 }
 
-LegCurve makeLegCurve(const ProcBody& body, JointId hip, JointId knee, JointId foot, double speed, double period, double stance,
-                      const GaitStyle& style) {
+double ease(double t) {
+  t = std::clamp(t, 0.0, 1.0);
+  return t * t * (3.0 - 2.0 * t);
+}
+
+double sampleKeys(const std::vector<std::pair<double, double>>& keys, double phase) {
+  phase -= std::floor(phase);
+  if (phase >= 1.0) phase = 0.0;
+  for (std::size_t index = 1; index < keys.size(); ++index) {
+    if (phase <= keys[index].first || index + 1 == keys.size()) {
+      const double span = keys[index].first - keys[index - 1].first;
+      const double weight = span > 1e-8 ? ease((phase - keys[index - 1].first) / span) : 0.0;
+      return keys[index - 1].second * (1.0 - weight) + keys[index].second * weight;
+    }
+  }
+  return keys.empty() ? 0.0 : keys.front().second;
+}
+
+// Positive hip is thigh-forward. Negative knee is flexion. Positive ankle lifts the toe.
+LegCurve makeAerialLeg(double stance, bool sprint) {
+  const double contact_hip = sprint ? 0.82 : 0.58;
+  const double toe_hip = sprint ? -0.98 : -0.82;
+  const double contact_knee = sprint ? -0.20 : -0.14;
+  const double compress_knee = sprint ? -0.58 : -0.42;
+  const double toe_knee = sprint ? -0.26 : -0.20;
+  const double peak_knee = sprint ? -1.32 : -1.08;
+  const double peak_u = sprint ? 0.30 : 0.40;
+  const double late_u = sprint ? 0.72 : 0.78;
+  const double swing = std::max(1e-3, 1.0 - stance);
+  const double early = stance + 0.16 * swing;
+  const double peak = stance + peak_u * swing;
+  const double late = stance + late_u * swing;
+  const std::vector<std::pair<double, double>> hip = {
+      {0.0, contact_hip},
+      {0.40 * stance, sprint ? 0.15 : 0.08},
+      {stance, toe_hip},
+      {early, sprint ? -0.70 : -0.55},
+      {peak, sprint ? 0.20 : 0.05},
+      {late, contact_hip - 0.04},
+      {1.0, contact_hip},
+  };
+  const std::vector<std::pair<double, double>> knee = {
+      {0.0, contact_knee},
+      {0.38 * stance, compress_knee},
+      {stance, toe_knee},
+      {peak, peak_knee},
+      {late, sprint ? -0.48 : -0.40},
+      {stance + 0.92 * swing, contact_knee - 0.04},
+      {1.0, contact_knee},
+  };
+  const std::vector<std::pair<double, double>> ankle = {
+      {0.0, 0.04},
+      {0.35 * stance, sprint ? 0.30 : 0.26},
+      {stance, sprint ? -0.48 : -0.40},
+      {stance + 0.22 * swing, 0.16},
+      {stance + 0.80 * swing, 0.06},
+      {1.0, 0.04},
+  };
+  LegCurve curve;
+  for (int sample = 0; sample < kLocoPhaseSamples; ++sample) {
+    const double phase = static_cast<double>(sample) / static_cast<double>(kLocoPhaseSamples);
+    curve.hip[static_cast<std::size_t>(sample)] = sampleKeys(hip, phase);
+    curve.knee[static_cast<std::size_t>(sample)] = sampleKeys(knee, phase);
+    curve.ankle[static_cast<std::size_t>(sample)] = sampleKeys(ankle, phase);
+  }
+  return curve;
+}
+
+LegCurve makeWalkLeg(const ProcBody& body, JointId hip, JointId knee, JointId foot, double speed, double period, double stance,
+                     const GaitStyle& style) {
   LegCurve curve;
   const double plant = footY(body, hip, knee, foot, 0.0, 0.35, 0.0, quatIdentity());
   const double stance_end = solveHip(body, hip, knee, foot, speed * stance * period, plant, pelvisRotation(stance, style));
@@ -128,6 +201,13 @@ LegCurve makeLegCurve(const ProcBody& body, JointId hip, JointId knee, JointId f
   curve.knee[0] = 0.0;
   curve.ankle[0] = 0.0;
   return curve;
+}
+
+LegCurve makeLegCurve(const ProcBody& body, JointId hip, JointId knee, JointId foot, double speed, double period, double stance,
+                      const GaitStyle& style) {
+  if (style.regime == "run") return makeAerialLeg(stance, false);
+  if (style.regime == "sprint") return makeAerialLeg(stance, true);
+  return makeWalkLeg(body, hip, knee, foot, speed, period, stance, style);
 }
 
 double sampleCurve(const std::array<double, kLocoPhaseSamples>& curve, double phase) {

@@ -3,6 +3,7 @@
 #include "analysis/locomotion_model_builder.h"
 #include "analysis/proc_analysis.h"
 #include "analysis/synthetic_locomotion.h"
+#include "app/generator_preview.h"
 #include "body/joint_limits.h"
 #include "body/proc_body.h"
 #include "locomotion/body_scale.h"
@@ -546,6 +547,133 @@ int runLocomotionTests() {
                        phase0.joints[proc::jointIndex(proc::JointId::RightShoulder)].position.z - 0.15,
                "both arms hang below the shoulders");
 
+  auto sagittal = [](const proc::SpeedKnot& knot, proc::LocoChannel channel, int sample) {
+    return proc::hingeAngleDegrees(proc::quatExp(knot.rotation[static_cast<int>(channel)][static_cast<std::size_t>(sample)]),
+                                   glm::dvec3(1.0, 0.0, 0.0));
+  };
+  auto rangeOf = [&](const proc::SpeedKnot& knot, proc::LocoChannel channel) {
+    double low = sagittal(knot, channel, 0);
+    double high = low;
+    for (int sample = 1; sample < proc::kLocoPhaseSamples; ++sample) {
+      const double angle = sagittal(knot, channel, sample);
+      low = std::min(low, angle);
+      high = std::max(high, angle);
+    }
+    return high - low;
+  };
+  auto stanceOf = [](const proc::SpeedKnot& knot) {
+    int count = 0;
+    for (double value : knot.contact_left_heel) {
+      if (value >= 0.5) ++count;
+    }
+    return static_cast<double>(count) / static_cast<double>(proc::kLocoPhaseSamples);
+  };
+  auto flightOf = [](const proc::SpeedKnot& knot) {
+    int count = 0;
+    for (int sample = 0; sample < proc::kLocoPhaseSamples; ++sample) {
+      if (knot.contact_left_heel[static_cast<std::size_t>(sample)] < 0.5 &&
+          knot.contact_right_heel[static_cast<std::size_t>(sample)] < 0.5)
+        ++count;
+    }
+    return count;
+  };
+  const proc::SpeedKnot& aerial_walk = demo.walk.knots[demo.walk.knots.size() / 2];
+  const proc::SpeedKnot& aerial_run = demo.run.knots.front();
+  const proc::SpeedKnot& aerial_sprint = demo.sprint.knots.front();
+  double walk_support_knee = 0.0;
+  double run_support_knee = 0.0;
+  double sprint_support_knee = 0.0;
+  for (int sample = 0; sample < proc::kLocoPhaseSamples; ++sample) {
+    if (aerial_run.contact_left_heel[static_cast<std::size_t>(sample)] >= 0.5)
+      run_support_knee = std::min(run_support_knee, sagittal(aerial_run, proc::LocoChannel::LeftKnee, sample));
+    if (aerial_sprint.contact_left_heel[static_cast<std::size_t>(sample)] >= 0.5)
+      sprint_support_knee = std::min(sprint_support_knee, sagittal(aerial_sprint, proc::LocoChannel::LeftKnee, sample));
+    if (aerial_walk.contact_left_heel[static_cast<std::size_t>(sample)] >= 0.5)
+      walk_support_knee = std::min(walk_support_knee, sagittal(aerial_walk, proc::LocoChannel::LeftKnee, sample));
+  }
+  auto recovery = [&](const proc::SpeedKnot& knot) {
+    int peak = 0;
+    for (int sample = 1; sample < proc::kLocoPhaseSamples; ++sample) {
+      if (sagittal(knot, proc::LocoChannel::LeftKnee, sample) < sagittal(knot, proc::LocoChannel::LeftKnee, peak)) peak = sample;
+    }
+    double after = sagittal(knot, proc::LocoChannel::LeftKnee, peak);
+    for (int sample = peak + 1; sample < proc::kLocoPhaseSamples; ++sample) {
+      after = std::max(after, sagittal(knot, proc::LocoChannel::LeftKnee, sample));
+    }
+    return std::pair<int, double>{peak, after - sagittal(knot, proc::LocoChannel::LeftKnee, peak)};
+  };
+  const auto run_recovery = recovery(aerial_run);
+  const auto sprint_recovery = recovery(aerial_sprint);
+  stats.expect(run_support_knee < -8.0, "run support flexes the knee");
+  stats.expect(sprint_support_knee < -8.0, "sprint support flexes the knee");
+  stats.expect(flightOf(aerial_run) > 5, "run contains a flight interval");
+  stats.expect(flightOf(aerial_sprint) > flightOf(aerial_run), "sprint flight is longer than run flight");
+  stats.expect(flightOf(aerial_walk) == 0, "the representative walk knot does not require flight");
+  stats.expect(aerial_run.contact_left_heel[static_cast<std::size_t>(run_recovery.first)] < 0.5 && run_recovery.second > 20.0,
+               "run swing knee flexes and then extends before contact");
+  stats.expect(aerial_sprint.contact_left_heel[static_cast<std::size_t>(sprint_recovery.first)] < 0.5 && sprint_recovery.second > 25.0,
+               "sprint recovery flexion is followed by late-swing extension");
+  stats.expect(sagittal(aerial_sprint, proc::LocoChannel::LeftKnee, sprint_recovery.first) <
+                   sagittal(aerial_run, proc::LocoChannel::LeftKnee, run_recovery.first),
+               "sprint knee recovery is stronger than run");
+  const double walk_hip = rangeOf(aerial_walk, proc::LocoChannel::LeftHip);
+  const double run_hip = rangeOf(aerial_run, proc::LocoChannel::LeftHip);
+  const double sprint_hip = rangeOf(aerial_sprint, proc::LocoChannel::LeftHip);
+  stats.expect(run_hip > walk_hip + 5.0, "run hip excursion is larger than walk");
+  stats.expect(sprint_hip > run_hip + 5.0, "sprint hip excursion is larger than run");
+  stats.expect(stanceOf(aerial_sprint) + 0.02 < stanceOf(aerial_run), "sprint stance is shorter than run");
+  stats.expect(curveSpread(aerial_sprint, proc::LocoChannel::LeftShoulder) > curveSpread(aerial_walk, proc::LocoChannel::LeftShoulder) + 0.02,
+               "sprint arm excursion is larger than walk");
+  std::cout << "regime structure walk hip " << walk_hip << " run hip " << run_hip << " sprint hip " << sprint_hip << "\n";
+  std::cout << "support knee walk " << walk_support_knee << " run " << run_support_knee << " sprint " << sprint_support_knee << "\n";
+  std::cout << "knee peak phase run " << (static_cast<double>(run_recovery.first) / 100.0) << " extension " << run_recovery.second
+            << " sprint " << (static_cast<double>(sprint_recovery.first) / 100.0) << " extension " << sprint_recovery.second << "\n";
+  std::cout << "stance walk " << stanceOf(aerial_walk) << " run " << stanceOf(aerial_run) << " sprint " << stanceOf(aerial_sprint) << "\n";
+  std::cout << "flight samples walk " << flightOf(aerial_walk) << " run " << flightOf(aerial_run) << " sprint " << flightOf(aerial_sprint) << "\n";
+
+  proc::LocomotionState scrub = gait_state;
+  scrub.actual_speed_mps = 1.25;
+  scrub.root_position = glm::dvec3(1.0, 2.0, 0.0);
+  const glm::dvec3 scrub_root = scrub.root_position;
+  scrub.phase = 0.25;
+  const proc::Pose scrub_a = proc::generateLocomotionPose(neutral, demo, scrub).pose;
+  scrub.phase = 0.50;
+  const proc::Pose scrub_b = proc::generateLocomotionPose(neutral, demo, scrub).pose;
+  stats.expect(scrub.root_position == scrub_root && scrub.actual_speed_mps == 1.25, "phase scrubbing does not advance root travel");
+  bool scrub_pose_changed = scrub_a.root_rotation != scrub_b.root_rotation || scrub_a.root_translation.z != scrub_b.root_translation.z;
+  for (int joint = 0; joint < proc::kJointCount && !scrub_pose_changed; ++joint) {
+    scrub_pose_changed = scrub_a.local_rotation[static_cast<std::size_t>(joint)] != scrub_b.local_rotation[static_cast<std::size_t>(joint)];
+  }
+  stats.expect(scrub_pose_changed, "phase scrubbing changes the gait pose");
+  const proc::Pose preview = proc::poseForInPlacePreview(scrub_b);
+  stats.expect(preview.root_translation.x == 0.0 && preview.root_translation.y == 0.0 &&
+                   scrub_b.root_translation.z == preview.root_translation.z,
+               "in-place preview removes only horizontal travel");
+  stats.expect(scrub_b.root_translation.x != 0.0 || scrub_b.root_translation.y != 0.0 || scrub.root_position == scrub_root,
+               "in-place preview does not mutate the raw pose or the generator root");
+  proc::LocomotionCommand travel_command = command;
+  travel_command.desired_speed_mps = 1.25;
+  travel_command.max_accel_mps2 = 4.0;
+  travel_command.force = proc::RegimeForce::Walk;
+  const proc::ProcMotion traveled = proc::bakeLocomotion(neutral, demo, travel_command, 8.0, 30.0);
+  const glm::dvec3 traveled_end =
+      traveled.frames.back().root_translation + neutral.joints[proc::jointIndex(proc::JointId::LegRoot)].rest_position;
+  const double traveled_distance = std::sqrt(traveled_end.x * traveled_end.x + traveled_end.y * traveled_end.y);
+  stats.expect(std::abs(traveled_distance - 10.0) < 1e-4, "baked distance ignores the in-place display lock");
+  proc::LocomotionState ghost_source = scrub;
+  const proc::LocomotionState ghost = proc::ghostSampleState(ghost_source, 1.0);
+  stats.expect(ghost.phase == 0.0 && ghost_source.phase == 0.50 && ghost_source.root_position == scrub_root,
+               "ghost sampling wraps phase and does not write the live state");
+  proc::LocomotionState held_state = scrub;
+  held_state.actual_speed_mps = 3.0;
+  proc::LocomotionCommand held_command = command;
+  held_command.desired_speed_mps = 3.0;
+  held_command.force = proc::RegimeForce::Run;
+  held_command.max_accel_mps2 = 4.0;
+  proc::advanceLocomotion(held_state, demo, neutral, held_command, 0.0);
+  stats.expect(held_state.root_position == scrub_root && held_state.phase == 0.50 && held_state.regime == proc::LocomotionRegime::Run,
+               "a paused regime refresh keeps phase and root travel");
+
   const proc::ConstraintAudit audit = proc::auditLocomotionModel(neutral, demo);
   stats.expect(audit.ok && audit.violations == 0, "public synthetic model passes the neutral constraint audit");
   proc::ProcLocomotionModel broken = demo;
@@ -596,6 +724,55 @@ int runLocomotionTests() {
   std::cout << "male bone error " << male_error << "\n";
   std::cout << "slip L mean " << slip.left_mean_mps << " peak " << slip.left_peak_mps << " samples " << slip.left_samples << "\n";
   std::cout << "slip R mean " << slip.right_mean_mps << " peak " << slip.right_peak_mps << " samples " << slip.right_samples << "\n";
+  auto reportClosed = [&](const char* name, proc::RegimeForce force, double speed) {
+    proc::LocomotionCommand regime_command = command;
+    regime_command.force = force;
+    regime_command.desired_speed_mps = speed;
+    regime_command.heading = 0.0;
+    regime_command.max_accel_mps2 = 8.0;
+    const proc::ProcMotion motion = proc::bakeLocomotion(neutral, built, regime_command, 6.0, 50.0);
+    proc::SourceClip clip = clipFromGenerated(neutral, motion);
+    proc::AnalysisInput regime_input;
+    regime_input.source = &clip;
+    regime_input.motion = &motion;
+    regime_input.semantics = proc::semanticsFromMapping(identity);
+    const proc::ProcAnalysis regime = proc::analyzeClip(regime_input);
+    double speed_total = 0.0;
+    int speed_samples = 0;
+    for (std::size_t index = regime.signals.size() / 5; index + regime.signals.size() / 5 < regime.signals.size(); ++index) {
+      speed_total += regime.signals[index].root_horizontal_speed;
+      ++speed_samples;
+    }
+    const double regime_speed = speed_samples > 0 ? speed_total / static_cast<double>(speed_samples) : 0.0;
+    stats.expect(std::abs(regime_speed - speed) < 0.15, "closed-loop root speed stays near the command");
+    int regime_accepted = 0;
+    double regime_cadence = 0.0;
+    double regime_stride = 0.0;
+    double regime_stance = 0.0;
+    double regime_flight = 0.0;
+    for (const proc::GaitCycle& cycle : regime.cycles) {
+      if (!cycle.accepted || cycle.mirrored) continue;
+      ++regime_accepted;
+      regime_cadence += cycle.measurements.cadence_spm;
+      regime_stride += cycle.measurements.stride_length_m;
+      regime_stance += cycle.measurements.stance_fraction;
+      regime_flight += cycle.measurements.flight_fraction;
+    }
+    const proc::FootSlipReport regime_slip = proc::measureContactSlip(neutral, motion);
+    std::cout << name << " commanded " << speed << " measured " << regime_speed << " accepted " << regime_accepted << "\n";
+    if (regime_accepted > 0) {
+      std::cout << name << " cadence " << (regime_cadence / regime_accepted) << " stride " << (regime_stride / regime_accepted)
+                << " stance " << (regime_stance / regime_accepted) << " flight " << (regime_flight / regime_accepted) << "\n";
+    } else {
+      std::cout << name << " cadence not recovered\n";
+      for (const proc::GaitCycle& cycle : regime.cycles) {
+        if (!cycle.mirrored) std::cout << name << " cycle " << cycle.side << " " << cycle.rejection_reason << "\n";
+      }
+    }
+    std::cout << name << " slip L mean " << regime_slip.left_mean_mps << " peak " << regime_slip.left_peak_mps << " R mean "
+              << regime_slip.right_mean_mps << " peak " << regime_slip.right_peak_mps << "\n";
+  };
+
   std::cout << "closed-loop speed " << measured_speed << " accepted " << accepted << "\n";
   if (accepted > 0) {
     std::cout << "closed-loop cadence " << (cadence_sum / accepted) << " stride " << (stride_sum / accepted) << " stance "
@@ -606,6 +783,8 @@ int runLocomotionTests() {
       if (!cycle.mirrored) std::cout << "cycle " << cycle.side << " " << cycle.rejection_reason << "\n";
     }
   }
+  reportClosed("run", proc::RegimeForce::Run, 3.00);
+  reportClosed("sprint", proc::RegimeForce::Sprint, 5.80);
   const bool datasets = std::filesystem::exists(root / "datasets") || std::filesystem::exists(root / "analysis_output");
   std::cout << "real analysis present " << (datasets ? "yes" : "no") << "\n";
   return stats.failed;

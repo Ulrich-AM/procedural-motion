@@ -8,6 +8,7 @@
 #include "rig/forward_kinematics.h"
 #include "app/analysis_panel.h"
 #include "app/generator_panel.h"
+#include "app/generator_preview.h"
 #include "app/import_panel.h"
 #include "locomotion/locomotion_generator.h"
 #include "retarget/retargeter.h"
@@ -261,21 +262,27 @@ void updatePose(LabState& lab, double dt) {
   if (!lab.has_body) return;
   Pose pose;
   if (lab.generator.enabled && lab.generator.has_model) {
+    LocomotionCommand command;
+    command.desired_speed_mps = lab.generator.desired_speed;
+    command.heading = glm::radians(static_cast<double>(lab.generator.heading_deg));
+    command.max_accel_mps2 = lab.generator.acceleration;
+    command.force = static_cast<RegimeForce>(lab.generator.force);
     if (lab.generator.playing) {
-      LocomotionCommand command;
-      command.desired_speed_mps = lab.generator.desired_speed;
-      command.heading = glm::radians(static_cast<double>(lab.generator.heading_deg));
-      command.max_accel_mps2 = lab.generator.acceleration;
-      command.force = static_cast<RegimeForce>(lab.generator.force);
       advanceLocomotion(lab.generator.state, lab.generator.model, lab.body, command, dt);
+    } else {
+      // Keep the scrubbed phase and the traveled root. Refresh regime, speed, and heading.
+      lab.generator.state.actual_speed_mps = std::max(0.0, command.desired_speed_mps);
+      advanceLocomotion(lab.generator.state, lab.generator.model, lab.body, command, 0.0);
     }
     const GeneratedPoseResult generated =
         generateConstrainedLocomotionPose(lab.body, lab.generator.model, lab.generator.state, lab.limit_mode);
     pose = generated.limits.pose;
     lab.limits = generated.limits;
-    lab.world = forwardKinematics(lab.body, lab.limits.pose);
-    lab.bones = measureBoneLengths(lab.body, lab.world, kRuntimeBoneToleranceM);
-    accumulateGeneratorSlip(lab.generator, lab.world, lab.limits.pose, dt);
+    const WorldPose traveling = forwardKinematics(lab.body, pose);
+    lab.bones = measureBoneLengths(lab.body, traveling, kRuntimeBoneToleranceM);
+    accumulateGeneratorSlip(lab.generator, traveling, pose, dt);
+    const Pose shown = lab.generator.in_place ? poseForInPlacePreview(pose) : pose;
+    lab.world = forwardKinematics(lab.body, shown);
     lab.pose_ready = true;
     return;
   }
@@ -647,6 +654,19 @@ int Application::run() {
     drawGroundGrid(lab.renderer);
     const bool show_target = lab.pose_ready && (!lab.import.has_source || lab.import.view != ViewportMode::Source);
     const bool show_source = lab.import.has_source && lab.import.view != ViewportMode::Target;
+    if (show_target && lab.generator.enabled && lab.generator.has_model && lab.generator.show_ghosts) {
+      const double marks[] = {0.0, 0.25, 0.50, 0.75};
+      for (double mark : marks) {
+        const LocomotionState sample = ghostSampleState(lab.generator.state, mark);
+        const GeneratedPoseResult ghost =
+            generateConstrainedLocomotionPose(lab.body, lab.generator.model, sample, lab.limit_mode);
+        const Pose shown = poseForInPlacePreview(ghost.limits.pose);
+        SkeletonDrawOptions ghost_options;
+        ghost_options.draw_facing_marker = false;
+        ghost_options.shade = 0.38f;
+        drawSkeleton(lab.renderer, lab.body, forwardKinematics(lab.body, shown), ghost_options);
+      }
+    }
     if (show_target) {
       SkeletonDrawOptions options;
       options.contacts = lab.has_motion ? &lab.limits.pose.contacts : nullptr;

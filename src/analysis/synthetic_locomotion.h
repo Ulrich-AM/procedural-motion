@@ -19,6 +19,8 @@ struct SyntheticClipSpec {
 
 // Repository-owned demonstration cycles. Knees flex on the negative side of each
 // hinge axis. Arms hang down and swing opposite the same-side leg.
+// Walk, run, and sprint use different phase templates. The numbers are synthetic
+// modeling values, not measured gait.
 ProcAnalysis makeSyntheticLocomotionAnalysis(const ProcBody& body, const SyntheticClipSpec& spec);
 
 std::vector<ProcAnalysis> makeSyntheticLocomotionSet(const ProcBody& body);

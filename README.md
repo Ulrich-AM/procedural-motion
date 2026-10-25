@@ -456,6 +456,10 @@ These ranges are preliminary placeholders. They are not clinical or measured joi
 
 The synthetic fixture uses moderate negative knee flexion, a small ankle progression through stance, plantarflexion, and swing recovery, an arm-down shoulder pose built with `quatRotateFromTo` from the rest upper-arm direction toward mostly `-Z`, contralateral arm swing, a mild elbow bend on each elbow's own axis, and a small pelvis pitch, pelvis roll, and spine counterrotation. Neck, hands, and fingers stay at identity.
 
+Walk, run, and sprint do not share one leg curve. Walk keeps a long support interval, a planted hip progression, and a single swing-knee recovery. Run and sprint use their own phase keys: support compression, a flight interval, rapid swing recovery, and a late-swing extension before the next contact. Sprint is shorter in stance and larger in hip, knee recovery, and arm swing than run. Those key values are synthetic modeling choices guided by the usual stance and flight trends of the three regimes. They are not measurements, and the public model is not a scientific gait.
+
+Generator mode can hold the character in place for inspection. In-place preview clears only the horizontal root translation on the displayed pose. The generator state, foot-slip sample, bake, and root distance keep the real travel. Playback of a baked `.procmo` is unchanged. While playback is paused, the phase slider and the 0.00 / 0.25 / 0.50 / 0.75 steps set `LocomotionState.phase` and do not advance time. Ghost poses, when enabled, draw stationary quarter-cycle samples and do not enter diagnostics. The panel can overlay walk, run, and sprint hip, knee, and ankle curves and a support/flight bar taken from the model contact curves.
+
 `assets/models/synthetic_locomotion.procloco.json` is that fixture. Third-party-derived models belong in `local_models/` and are not committed.
 
 ### Known limitations
