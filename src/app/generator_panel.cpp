@@ -125,6 +125,7 @@ void loadLocomotionModel(GeneratorUi& ui, const std::filesystem::path& path) {
   }
   ui.model = std::move(model);
   ui.has_model = true;
+  ui.audit_valid = false;
   ui.state = {};
   ui.has_previous = false;
   ui.left_samples = ui.right_samples = 0;
@@ -158,7 +159,8 @@ void accumulateGeneratorSlip(GeneratorUi& ui, const WorldPose& world, const Pose
 }
 
 void drawGeneratorPanel(GeneratorUi& ui, GLFWwindow* window, const ProcBody* body, bool has_body,
-                        const std::filesystem::path& asset_root) {
+                        const std::filesystem::path& asset_root, const std::filesystem::path& body_path, LimitMode* limit_mode,
+                        const LimitResult* limits) {
   ImGui::TextWrapped("%s", ui.path.empty() ? "no model" : ui.path.filename().string().c_str());
   if (ImGui::Button("Load locomotion model")) {
     const std::filesystem::path path = openModelDialog(window, asset_root / "assets" / "models");
@@ -204,6 +206,39 @@ void drawGeneratorPanel(GeneratorUi& ui, GLFWwindow* window, const ProcBody* bod
   ImGui::Text("contact L %.2f  R %.2f", ui.state.contact_left, ui.state.contact_right);
   ImGui::Text("slip L mean %.3f peak %.3f m/s", ui.left_mean_mps, ui.left_peak_mps);
   ImGui::Text("slip R mean %.3f peak %.3f m/s", ui.right_mean_mps, ui.right_peak_mps);
+  ImGui::TextUnformatted("CONSTRAINT MODE");
+  if (limit_mode != nullptr) {
+    if (ImGui::RadioButton("WARN", *limit_mode == LimitMode::Warn)) *limit_mode = LimitMode::Warn;
+    ImGui::SameLine();
+    if (ImGui::RadioButton("CLAMP", *limit_mode == LimitMode::Clamp)) *limit_mode = LimitMode::Clamp;
+  }
+  const int raw_violations = limits != nullptr ? static_cast<int>(limits->violations.size()) : 0;
+  ImGui::Text("raw violations: %d", raw_violations);
+  ImGui::Text("clamped: %s", limits != nullptr && limits->clamped ? "YES" : "NO");
+  if (limits != nullptr) {
+    const int shown = std::min(4, raw_violations);
+    for (int index = 0; index < shown; ++index) ImGui::TextWrapped("%s", limits->violations[static_cast<std::size_t>(index)].message.c_str());
+  }
+  ImGui::TextWrapped("WARN keeps the raw generator pose. CLAMP rewrites only this runtime pose. The locomotion model is not changed.");
+  const std::string body_key = body_path.string();
+  if (ui.audited_body != body_key) ui.audit_valid = false;
+  if (has_body && body != nullptr && !ui.audit_valid) {
+    ui.audit = auditLocomotionModel(*body, ui.model);
+    ui.audit_valid = true;
+    ui.audited_body = body_key;
+  }
+  if (ImGui::Button("Re-run audit") && has_body && body != nullptr) {
+    ui.audit = auditLocomotionModel(*body, ui.model);
+    ui.audit_valid = true;
+    ui.audited_body = body_key;
+  }
+  if (ui.audit_valid) {
+    ImGui::TextUnformatted("CONSTRAINT AUDIT");
+    ImGui::Text("status      %s", ui.audit.ok ? "PASS" : "WARN");
+    ImGui::Text("violations  %d", ui.audit.violations);
+    ImGui::Text("worst       %s", ui.audit.worst_joint.empty() ? "none" : ui.audit.worst_joint.c_str());
+    if (!ui.audit.ok) ImGui::Text("phase       %.2f  %s", ui.audit.worst_phase, ui.audit.worst_regime.c_str());
+  }
   if (!ui.state.note.empty()) ImGui::TextWrapped("%s", ui.state.note.c_str());
   ImGui::TextWrapped("Straight gait only. Heading yaws the whole cycle. There is no turning step, bank, or foot IK. Slip is reported and not corrected.");
 

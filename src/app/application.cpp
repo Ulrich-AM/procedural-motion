@@ -269,8 +269,10 @@ void updatePose(LabState& lab, double dt) {
       command.force = static_cast<RegimeForce>(lab.generator.force);
       advanceLocomotion(lab.generator.state, lab.generator.model, lab.body, command, dt);
     }
-    pose = generateLocomotionPose(lab.body, lab.generator.model, lab.generator.state).pose;
-    lab.limits = applyJointLimits(lab.body, pose, lab.limit_mode);
+    const GeneratedPoseResult generated =
+        generateConstrainedLocomotionPose(lab.body, lab.generator.model, lab.generator.state, lab.limit_mode);
+    pose = generated.limits.pose;
+    lab.limits = generated.limits;
     lab.world = forwardKinematics(lab.body, lab.limits.pose);
     lab.bones = measureBoneLengths(lab.body, lab.world, kRuntimeBoneToleranceM);
     accumulateGeneratorSlip(lab.generator, lab.world, lab.limits.pose, dt);
@@ -341,7 +343,8 @@ void drawSidePanel(LabState& lab) {
   if (ImGui::RadioButton("GENERATOR", lab.generator.enabled)) lab.generator.enabled = true;
   if (lab.generator.enabled) {
     section("GENERATOR");
-    drawGeneratorPanel(lab.generator, lab.window, lab.has_body ? &lab.body : nullptr, lab.has_body, lab.asset_root);
+    drawGeneratorPanel(lab.generator, lab.window, lab.has_body ? &lab.body : nullptr, lab.has_body, lab.asset_root, lab.body_path,
+                       &lab.limit_mode, &lab.limits);
   }
   if (!lab.generator.enabled) {
   section("MOTION");

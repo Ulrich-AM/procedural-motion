@@ -91,4 +91,24 @@ inline glm::dquat quatExp(const glm::dvec3& log_vector) {
   return quatUnit(glm::dquat(std::cos(half_angle), log_vector.x * scale, log_vector.y * scale, log_vector.z * scale));
 }
 
+// Shortest rotation taking normalized A onto normalized B.
+// Parallel vectors return identity. Opposite vectors rotate 180 degrees about a
+// deterministic perpendicular. A near-zero input returns identity.
+inline glm::dquat quatRotateFromTo(glm::dvec3 from, glm::dvec3 to) {
+  const double from_length = glm::length(from);
+  const double to_length = glm::length(to);
+  if (from_length < 1e-8 || to_length < 1e-8) return quatIdentity();
+  from /= from_length;
+  to /= to_length;
+  const double cosine = std::clamp(glm::dot(from, to), -1.0, 1.0);
+  if (cosine > 1.0 - 1e-8) return quatIdentity();
+  if (cosine < -1.0 + 1e-8) {
+    glm::dvec3 axis = glm::cross(from, glm::dvec3(1.0, 0.0, 0.0));
+    if (glm::length(axis) < 1e-6) axis = glm::cross(from, glm::dvec3(0.0, 1.0, 0.0));
+    return quatAxisAngle(axis, 3.14159265358979323846);
+  }
+  const glm::dvec3 axis = glm::cross(from, to);
+  return quatUnit(glm::dquat(1.0 + cosine, axis.x, axis.y, axis.z));
+}
+
 }  // namespace proc

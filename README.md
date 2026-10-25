@@ -406,7 +406,17 @@ Curves are full 3D quaternion logs for the pelvis residual, both spine joints, a
 proc_motion_model.exe --input analysis_output\lafan1\clips --output local_models\human_locomotion.procloco.json
 ```
 
-Optional filters: `--min-quality`, `--regime`, `--subject`, `--bin-width`. It keeps accepted, straight, non-mirrored cycles, then canonicalizes them. Phase 0 is left initial contact. A right cycle is reflected across the sagittal plane (`+X` right, `+Y` forward, `+Z` up) and the left/right channels are swapped. Mirroring twice recovers the pose. The builder does not understand the runtime, and the runtime loader does not understand `PROC_ANALYSIS`.
+Optional filters: `--min-quality`, `--regime`, `--subject`, `--bin-width`. `--body` loads a PROC BODY after the write and prints a constraint audit. That audit does not change the curves or the exit code of a successful write. The builder does not clamp samples to one body. The `.procloco` file stays body-independent.
+
+It keeps accepted, straight, non-mirrored cycles, then canonicalizes them. Phase 0 is left initial contact. A right cycle is reflected across the sagittal plane (`+X` right, `+Y` forward, `+Z` up) and the left/right channels are swapped. Mirroring twice recovers the pose. The builder does not understand the runtime, and the runtime loader does not understand `PROC_ANALYSIS`.
+
+The public demonstration model is repository-owned synthetic data. Tests do not rewrite it. Regenerate it with:
+
+```text
+proc_synthetic_model.exe --body assets\bodies\neutral.procbody.json --output assets\models\synthetic_locomotion.procloco.json
+```
+
+That tool builds the synthetic analyses, writes the model, then audits it against the supplied body. It exits 1 when the audit finds a joint-limit violation. The synthetic walk is a generator fixture. It is not a measured human gait and it is not built from LAFAN1 or Mixamo.
 
 ### Runtime
 
@@ -428,16 +438,33 @@ The lab has PLAYBACK and GENERATOR. Generator controls are the model file, desir
 
 Bake writes an ordinary `.procmo`: root translation, root rotation, local rotations, and optional generated contacts. `source.type` is `procedural`. Those contacts are model probabilities, not Phase 3 observations.
 
-During predicted contact the lab reports mean and peak horizontal foot slip. It does not run foot IK or move the pelvis to hide that slip.
+During predicted contact the lab reports mean and peak horizontal foot slip. It does not run foot IK, lock the stance foot, or move the pelvis to hide that slip. A straight leg traveling on an arc often lifts the ankle above the contact height gate, so the detected stance fraction can be much shorter than the authored contact curve. That gap is measured and left in place.
 
-`assets/models/synthetic_locomotion.procloco.json` is built from repository-owned synthetic cycles. Third-party-derived models belong in `local_models/` and are not committed.
+### Raw pose and body constraints
+
+The generator writes a raw pose from the locomotion model. `applyJointLimits` then produces the runtime pose. WARN copies the raw pose and records violations. CLAMP rewrites only that runtime pose. Neither mode edits the `.procloco` curves. The lab default is WARN so a bad model stays visible. Generator mode shows CONSTRAINT MODE, the current frame's raw violation count, whether the frame was clamped, and a model constraint audit.
+
+The audit samples every regime, every speed knot, and 100 phases. It calls `applyJointLimits` in WARN mode and does not alter the model. A passing synthetic demo reports zero violations. An inverted knee reports the joint, the requested angle, and the allowed range.
+
+On the current canonical skeleton the sign of a hinge is the sign around that constraint's own axis:
+
+- Both knees hinge about `+X`. Negative rotation flexes the knee. Zero is straight. Positive rotation is a small hyperextension region. The placeholder range is about -150 to +10 degrees.
+- Both ankles hinge about `+X`. Positive rotation lifts the toe. Negative rotation points it down. The placeholder range is about -40 to +30 degrees.
+- The left elbow hinges about `(0, 0, -1)` and the right elbow about `(0, 0, 1)`, each about 0 to 150 degrees. Positive rotation along that axis flexes the elbow. The two sides do not share one raw quaternion sign.
+
+These ranges are preliminary placeholders. They are not clinical or measured joint limits.
+
+The synthetic fixture uses moderate negative knee flexion, a small ankle progression through stance, plantarflexion, and swing recovery, an arm-down shoulder pose built with `quatRotateFromTo` from the rest upper-arm direction toward mostly `-Z`, contralateral arm swing, a mild elbow bend on each elbow's own axis, and a small pelvis pitch, pelvis roll, and spine counterrotation. Neck, hands, and fingers stay at identity.
+
+`assets/models/synthetic_locomotion.procloco.json` is that fixture. Third-party-derived models belong in `local_models/` and are not committed.
 
 ### Known limitations
 
-- The gait is straight. Heading only rotates the whole cycle.
-- Feet are not locked. Slip is a measurement.
+- The public model is synthetic. It exercises the generator, interpolation, regimes, and constraints. It is not a scientific gait model, and there is no committed LAFAN1 or Mixamo locomotion model.
+- The gait is straight. Heading only rotates the whole cycle. There is no true turning step.
+- Feet are not locked. Mean and peak foot slip stay visible. Detected stance can be shorter than the authored contact fraction.
 - There is no terrain, balance, physics, ragdoll, or motion matching.
 - Neck and finger joints stay at identity.
-- A synthetic fixture shows that the pipeline is coherent. It is not evidence of visual realism.
+- Joint limits are placeholders, not anatomical ground truth.
 - `PROC_ANALYSIS` v1 still calls dimensionless speed `froude_number`.
 - Optional toe mappings (`LeftToeBase`, `RightToeBase`, `LeftToe`, `RightToe` → `ltoesj` / `rtoesj`) do not make a profile fail when the source has no toe. A missing toe still falls back to the foot, with the existing provenance warning.

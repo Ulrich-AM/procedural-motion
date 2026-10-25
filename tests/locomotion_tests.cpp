@@ -2,8 +2,11 @@
 
 #include "analysis/locomotion_model_builder.h"
 #include "analysis/proc_analysis.h"
+#include "analysis/synthetic_locomotion.h"
+#include "body/joint_limits.h"
 #include "body/proc_body.h"
 #include "locomotion/body_scale.h"
+#include "locomotion/locomotion_audit.h"
 #include "locomotion/locomotion_diagnostics.h"
 #include "locomotion/locomotion_generator.h"
 #include "locomotion/locomotion_model_io.h"
@@ -24,149 +27,6 @@
 #include <sstream>
 
 namespace {
-
-const glm::dvec3 kX(1.0, 0.0, 0.0);
-
-double footY(const proc::ProcBody& body, proc::JointId hip, proc::JointId knee, proc::JointId foot, double root_y, double hip_angle,
-             double knee_angle) {
-  proc::Pose pose;
-  pose.root_translation = glm::dvec3(0.0, root_y, 0.0);
-  pose.local_rotation[proc::jointIndex(hip)] = proc::quatAxisAngle(kX, hip_angle);
-  pose.local_rotation[proc::jointIndex(knee)] = proc::quatAxisAngle(kX, knee_angle);
-  return proc::forwardKinematics(body, pose).joints[proc::jointIndex(foot)].position.y;
-}
-
-double solveHip(const proc::ProcBody& body, proc::JointId hip, proc::JointId knee, proc::JointId foot, double root_y, double knee_angle,
-                double target_y) {
-  const double at_low = footY(body, hip, knee, foot, root_y, -1.2, knee_angle);
-  const double at_high = footY(body, hip, knee, foot, root_y, 1.2, knee_angle);
-  const bool rising = at_high > at_low;
-  double low = -1.2;
-  double high = 1.2;
-  for (int step = 0; step < 28; ++step) {
-    const double mid = 0.5 * (low + high);
-    const double value = footY(body, hip, knee, foot, root_y, mid, knee_angle);
-    if ((value < target_y) == rising) low = mid;
-    else high = mid;
-  }
-  return 0.5 * (low + high);
-}
-
-struct LegCurve {
-  std::array<double, proc::kLocoPhaseSamples> hip{};
-  std::array<double, proc::kLocoPhaseSamples> knee{};
-  std::array<double, proc::kLocoPhaseSamples> contact{};
-};
-
-LegCurve makeLegCurve(const proc::ProcBody& body, proc::JointId hip, proc::JointId knee, proc::JointId foot, double speed, double period,
-                      double stance) {
-  LegCurve curve;
-  const double plant = footY(body, hip, knee, foot, 0.0, 0.40, 0.0);
-  const double stance_end = solveHip(body, hip, knee, foot, speed * stance * period, 0.0, plant);
-  for (int sample = 0; sample < proc::kLocoPhaseSamples; ++sample) {
-    const double phase = static_cast<double>(sample) / static_cast<double>(proc::kLocoPhaseSamples);
-    if (phase < stance) {
-      curve.hip[static_cast<std::size_t>(sample)] = solveHip(body, hip, knee, foot, speed * phase * period, 0.0, plant);
-      curve.knee[static_cast<std::size_t>(sample)] = 0.0;
-      curve.contact[static_cast<std::size_t>(sample)] = 1.0;
-    } else {
-      const double swing = (phase - stance) / std::max(1e-6, 1.0 - stance);
-      const double shaped = swing * swing * (3.0 - 2.0 * swing);
-      curve.hip[static_cast<std::size_t>(sample)] = stance_end * (1.0 - shaped) + 0.40 * shaped;
-      curve.knee[static_cast<std::size_t>(sample)] = std::sin(3.14159265358979323846 * swing) * 0.85;
-      curve.contact[static_cast<std::size_t>(sample)] = 0.0;
-    }
-  }
-  curve.hip[0] = 0.40;
-  return curve;
-}
-
-double sampleCurve(const std::array<double, proc::kLocoPhaseSamples>& curve, double phase) {
-  phase -= std::floor(phase);
-  const double position = phase * static_cast<double>(proc::kLocoPhaseSamples);
-  const int lower = static_cast<int>(std::floor(position)) % proc::kLocoPhaseSamples;
-  const int upper = (lower + 1) % proc::kLocoPhaseSamples;
-  const double weight = position - std::floor(position);
-  return curve[static_cast<std::size_t>(lower)] * (1.0 - weight) + curve[static_cast<std::size_t>(upper)] * weight;
-}
-
-proc::ProcAnalysis makeAnalysis(const proc::ProcBody& body, const std::string& regime, double speed, double period, double stance,
-                                const std::string& subject) {
-  const double leg = proc::targetLegLength(body);
-  const LegCurve left = makeLegCurve(body, proc::JointId::LeftHip, proc::JointId::LeftKnee, proc::JointId::LeftFoot, speed, period, stance);
-  const LegCurve right = makeLegCurve(body, proc::JointId::RightHip, proc::JointId::RightKnee, proc::JointId::RightFoot, speed, period, stance);
-  proc::ProcAnalysis analysis;
-  analysis.source.clip = regime + "_" + std::to_string(speed);
-  analysis.source.subject = subject;
-  analysis.source_leg_length_m = leg;
-  const double fps = 50.0;
-  const double duration = 4.0;
-  const int frames = static_cast<int>(std::round(duration * fps)) + 1;
-  const glm::dvec3 rest = body.joints[proc::jointIndex(proc::JointId::LegRoot)].rest_position;
-  for (int index = 0; index < frames; ++index) {
-    proc::SignalFrame frame;
-    frame.time = static_cast<double>(index) / fps;
-    const double phase = std::fmod(frame.time, period) / period;
-    const double right_phase = phase - 0.5 < 0.0 ? phase + 0.5 : phase - 0.5;
-    frame.root_y = speed * frame.time;
-    frame.root_z = rest.z + 0.02 * std::sin(6.283185307179586 * phase);
-    const double left_hip = sampleCurve(left.hip, phase);
-    const double left_knee = sampleCurve(left.knee, phase);
-    const double right_hip = sampleCurve(right.hip, right_phase);
-    const double right_knee = sampleCurve(right.knee, right_phase);
-    frame.log_vector[static_cast<int>(proc::RotChannel::LeftHip)] = proc::quatLog(proc::quatAxisAngle(kX, left_hip));
-    frame.log_vector[static_cast<int>(proc::RotChannel::LeftKnee)] = proc::quatLog(proc::quatAxisAngle(kX, left_knee));
-    frame.log_vector[static_cast<int>(proc::RotChannel::RightHip)] = proc::quatLog(proc::quatAxisAngle(kX, right_hip));
-    frame.log_vector[static_cast<int>(proc::RotChannel::RightKnee)] = proc::quatLog(proc::quatAxisAngle(kX, right_knee));
-    analysis.signals.push_back(frame);
-  }
-  auto track = [&](const std::string& name, bool left_side) {
-    proc::ContactTrack marker;
-    marker.marker = name;
-    marker.contact.resize(analysis.signals.size(), 0);
-    for (std::size_t index = 0; index < analysis.signals.size(); ++index) {
-      double phase = std::fmod(analysis.signals[index].time, period) / period;
-      if (!left_side) phase = phase - 0.5 < 0.0 ? phase + 0.5 : phase - 0.5;
-      marker.contact[index] = phase < stance ? 1 : 0;
-    }
-    analysis.contacts.push_back(std::move(marker));
-  };
-  track("left_heel", true);
-  track("left_toe", true);
-  track("right_heel", false);
-  track("right_toe", false);
-
-  proc::GaitCycle cycle;
-  cycle.index = 0;
-  cycle.side = "left";
-  cycle.accepted = true;
-  cycle.classification = "straight";
-  cycle.observed_regime = regime;
-  cycle.start_time = period;
-  cycle.end_time = period * 2.0;
-  cycle.quality.overall = 0.92;
-  cycle.measurements.speed_mps = speed;
-  cycle.measurements.cadence_spm = 120.0 / period;
-  cycle.measurements.stride_length_m = speed * period;
-  cycle.measurements.normalized_stride_length = leg > 0.0 ? speed * period / leg : 0.0;
-  cycle.measurements.stance_fraction = stance;
-  cycle.measurements.flight_fraction = std::max(0.0, 1.0 - 2.0 * stance);
-  cycle.measurements.travel_direction_deg = 0.0;
-  analysis.cycles.push_back(cycle);
-
-  proc::GaitCycle rejected = cycle;
-  rejected.index = 1;
-  rejected.accepted = false;
-  rejected.classification = "rejected";
-  rejected.quality.overall = 0.1;
-  analysis.cycles.push_back(rejected);
-  proc::GaitCycle mirrored = cycle;
-  mirrored.index = 2;
-  mirrored.mirrored = true;
-  mirrored.side = "left";
-  analysis.cycles.push_back(mirrored);
-  return analysis;
-}
 
 void scaleBones(proc::ProcBody& body, const std::vector<std::string>& names, double scale) {
   for (proc::BoneGeom& bone : body.bones) {
@@ -238,6 +98,54 @@ int runLocomotionTests() {
   const proc::Status body_status = proc::loadProcBodyFromFile(root / "assets" / "bodies" / "neutral.procbody.json", neutral);
   stats.expect(body_status.ok(), "neutral body loads for locomotion tests");
   if (!body_status.ok()) return stats.failed;
+
+  const glm::dvec3 from_x(1.0, 0.0, 0.0);
+  const glm::dquat same = proc::quatRotateFromTo(from_x, from_x);
+  stats.expect(std::abs(glm::dot(same, proc::quatIdentity())) > 0.999999, "parallel vectors rotate by identity");
+  const glm::dquat turned = proc::quatRotateFromTo(from_x, glm::dvec3(0.0, 1.0, 0.0));
+  const glm::dvec3 turned_x = turned * from_x;
+  stats.expect(glm::length(turned_x - glm::dvec3(0.0, 1.0, 0.0)) < 1e-6, "rotation-from-to maps the source vector onto the target");
+  const glm::dquat opposite = proc::quatRotateFromTo(from_x, glm::dvec3(-1.0, 0.0, 0.0));
+  const glm::dquat opposite_again = proc::quatRotateFromTo(from_x, glm::dvec3(-1.0, 0.0, 0.0));
+  stats.expect(glm::length(opposite * from_x - glm::dvec3(-1.0, 0.0, 0.0)) < 1e-6, "opposite vectors rotate by a half turn");
+  stats.expect(std::abs(glm::dot(opposite, opposite_again)) > 0.999999, "the opposite-vector rotation is deterministic");
+  stats.expect(proc::quatRotateFromTo(glm::dvec3(0.0), from_x).w == 1.0, "a zero vector does not invent a rotation");
+
+  const proc::WorldPose straight = proc::forwardKinematics(neutral, proc::Pose{});
+  auto posed = [&](proc::JointId joint, double radians) {
+    proc::Pose pose;
+    const glm::dvec3 axis = neutral.constraints[proc::jointIndex(joint)].axis;
+    pose.local_rotation[proc::jointIndex(joint)] = proc::quatAxisAngle(axis, radians);
+    return proc::forwardKinematics(neutral, pose);
+  };
+  const proc::WorldPose left_knee = posed(proc::JointId::LeftKnee, -0.8);
+  const proc::WorldPose right_knee = posed(proc::JointId::RightKnee, -0.8);
+  stats.expect(left_knee.joints[proc::jointIndex(proc::JointId::LeftFoot)].position.y <
+                       straight.joints[proc::jointIndex(proc::JointId::LeftFoot)].position.y - 0.02 &&
+                   left_knee.joints[proc::jointIndex(proc::JointId::LeftFoot)].position.z >
+                       straight.joints[proc::jointIndex(proc::JointId::LeftFoot)].position.z + 0.02,
+               "negative left-knee hinge flexion folds the shin backward and upward");
+  stats.expect(right_knee.joints[proc::jointIndex(proc::JointId::RightFoot)].position.y <
+                       straight.joints[proc::jointIndex(proc::JointId::RightFoot)].position.y - 0.02 &&
+                   right_knee.joints[proc::jointIndex(proc::JointId::RightFoot)].position.z >
+                       straight.joints[proc::jointIndex(proc::JointId::RightFoot)].position.z + 0.02,
+               "negative right-knee hinge flexion folds the shin backward and upward");
+  const proc::WorldPose left_hyper = posed(proc::JointId::LeftKnee, 0.15);
+  stats.expect(left_hyper.joints[proc::jointIndex(proc::JointId::LeftFoot)].position.y >
+                   straight.joints[proc::jointIndex(proc::JointId::LeftFoot)].position.y,
+               "positive knee rotation is the small hyperextension side");
+  const proc::WorldPose left_elbow = posed(proc::JointId::LeftElbow, 0.9);
+  const proc::WorldPose right_elbow = posed(proc::JointId::RightElbow, 0.9);
+  stats.expect(left_elbow.joints[proc::jointIndex(proc::JointId::LeftHand)].position.y >
+                   straight.joints[proc::jointIndex(proc::JointId::LeftHand)].position.y + 0.05,
+               "positive left-elbow hinge flexion brings the hand forward");
+  stats.expect(right_elbow.joints[proc::jointIndex(proc::JointId::RightHand)].position.y >
+                   straight.joints[proc::jointIndex(proc::JointId::RightHand)].position.y + 0.05,
+               "positive right-elbow hinge flexion brings the hand forward");
+  const proc::WorldPose left_ankle = posed(proc::JointId::LeftFoot, 0.35);
+  stats.expect(left_ankle.joints[proc::jointIndex(proc::JointId::LeftToe)].position.z >
+                   straight.joints[proc::jointIndex(proc::JointId::LeftToe)].position.z + 0.01,
+               "positive ankle hinge rotation lifts the toe");
 
   const double leg = proc::targetLegLength(neutral);
   stats.expect(leg > 0.7 && leg < 1.1, "target leg length uses the locked thigh and shin");
@@ -425,14 +333,7 @@ int runLocomotionTests() {
   stats.expect(held.regime == proc::LocomotionRegime::Run && std::abs(held.phase - held_phase) < 1e-12,
                "a small speed change does not flicker back to walk");
 
-  std::vector<proc::ProcAnalysis> analyses;
-  analyses.push_back(makeAnalysis(neutral, "walk", 0.90, 1.10, 0.62, "synthetic"));
-  analyses.push_back(makeAnalysis(neutral, "walk", 1.30, 1.00, 0.50, "synthetic"));
-  analyses.push_back(makeAnalysis(neutral, "walk", 1.70, 0.92, 0.58, "synthetic"));
-  analyses.push_back(makeAnalysis(neutral, "run", 3.00, 0.72, 0.34, "synthetic"));
-  analyses.push_back(makeAnalysis(neutral, "run", 3.80, 0.64, 0.30, "synthetic"));
-  analyses.push_back(makeAnalysis(neutral, "sprint", 5.80, 0.52, 0.24, "synthetic"));
-  analyses.push_back(makeAnalysis(neutral, "sprint", 6.60, 0.46, 0.22, "synthetic"));
+  std::vector<proc::ProcAnalysis> analyses = proc::makeSyntheticLocomotionSet(neutral);
   proc::ProcAnalysis other_subject = analyses[1];
   other_subject.source.subject = "other";
   analyses.push_back(other_subject);
@@ -461,7 +362,9 @@ int runLocomotionTests() {
   }
   stats.expect(finite_logs, "aggregated curves keep a 3D knee swing");
 
-  proc::ProcAnalysis right_only = makeAnalysis(neutral, "walk", 1.2, 1.0, 0.6, "synthetic");
+  proc::SyntheticClipSpec right_spec;
+  right_spec.speed_mps = 1.2;
+  proc::ProcAnalysis right_only = proc::makeSyntheticLocomotionAnalysis(neutral, right_spec);
   right_only.cycles.clear();
   proc::GaitCycle right;
   right.side = "right";
@@ -488,15 +391,19 @@ int runLocomotionTests() {
   const proc::ProcLocomotionModel mirrored = proc::buildLocomotionModel({right_only}, settings, mirror_warnings);
   stats.expect(!mirrored.walk.knots.empty(), "a right cycle still builds a knot");
   if (!mirrored.walk.knots.empty()) {
-    const double left_knee = mirrored.walk.knots.front().rotation[static_cast<int>(proc::LocoChannel::LeftKnee)][0].x;
-    stats.expect(std::abs(left_knee - 0.45) < 1e-3, "mirroring a right cycle canonicalizes it onto the left");
+    const double mirrored_left_knee = mirrored.walk.knots.front().rotation[static_cast<int>(proc::LocoChannel::LeftKnee)][0].x;
+    stats.expect(std::abs(mirrored_left_knee - 0.45) < 1e-3, "mirroring a right cycle canonicalizes it onto the left");
   }
 
-  std::filesystem::create_directories(root / "assets" / "models");
-  const std::filesystem::path model_path = root / "assets" / "models" / "synthetic_locomotion.procloco.json";
-  stats.expect(proc::writeLocomotionModelToFile(built, model_path).ok(), "synthetic locomotion model writes");
+  const std::filesystem::path temp_model = std::filesystem::temp_directory_path() / "proc_synthetic_locomotion_test.procloco.json";
+  stats.expect(proc::writeLocomotionModelToFile(built, temp_model).ok(), "synthetic locomotion model writes to a temporary file");
   proc::ProcLocomotionModel from_disk;
-  stats.expect(proc::readLocomotionModelFromFile(model_path, from_disk).ok(), "synthetic locomotion model reads");
+  stats.expect(proc::readLocomotionModelFromFile(temp_model, from_disk).ok(), "temporary locomotion model reads back");
+  const std::filesystem::path public_model = root / "assets" / "models" / "synthetic_locomotion.procloco.json";
+  proc::ProcLocomotionModel published;
+  stats.expect(proc::readLocomotionModelFromFile(public_model, published).ok(), "public synthetic locomotion model reads");
+  stats.expect(!std::filesystem::exists(root / "assets" / "models" / "synthetic_locomotion.procloco.json.tmp"),
+               "tests do not leave a rewrite of the public model");
 
   command.force = proc::RegimeForce::Walk;
   command.desired_speed_mps = 1.30;
@@ -564,6 +471,108 @@ int runLocomotionTests() {
     stats.expect(std::abs(cadence_sum / accepted - 120.0) < 20.0, "closed-loop cadence is near the model");
     stats.expect(std::abs(stride_sum / accepted - 1.30) < 0.25, "closed-loop stride is near the commanded speed times the cycle");
   }
+
+  auto curveSpread = [](const proc::SpeedKnot& knot, proc::LocoChannel channel) {
+    double spread = 0.0;
+    const auto& curve = knot.rotation[static_cast<int>(channel)];
+    for (int index = 1; index < proc::kLocoPhaseSamples; ++index) {
+      spread = std::max(spread, glm::length(curve[static_cast<std::size_t>(index)] - curve[0]));
+    }
+    return spread;
+  };
+  auto kneeFlexion = [&](const proc::RegimeModel& regime, proc::JointId knee) {
+    double lowest = 0.0;
+    bool inside = true;
+    const glm::dvec3 axis = neutral.constraints[proc::jointIndex(knee)].axis;
+    const double minimum = neutral.constraints[proc::jointIndex(knee)].min_deg;
+    const double maximum = neutral.constraints[proc::jointIndex(knee)].max_deg;
+    const int channel = knee == proc::JointId::LeftKnee ? static_cast<int>(proc::LocoChannel::LeftKnee)
+                                                        : static_cast<int>(proc::LocoChannel::RightKnee);
+    for (const proc::SpeedKnot& knot : regime.knots) {
+      for (const glm::dvec3& sample : knot.rotation[static_cast<std::size_t>(channel)]) {
+        const double degrees = proc::hingeAngleDegrees(proc::quatExp(sample), axis);
+        lowest = std::min(lowest, degrees);
+        if (degrees < minimum - 1e-3 || degrees > maximum + 1e-3) inside = false;
+      }
+    }
+    return std::pair<double, bool>{lowest, inside};
+  };
+  const proc::ProcLocomotionModel& demo = published.walk.present ? published : built;
+  for (const proc::RegimeModel* regime : {&demo.walk, &demo.run, &demo.sprint}) {
+    stats.expect(!regime->knots.empty(), "each synthetic regime has a knot");
+    if (regime->knots.empty()) continue;
+    const proc::SpeedKnot& knot = regime->knots.front();
+    stats.expect(curveSpread(knot, proc::LocoChannel::LeftHip) > 0.05 && curveSpread(knot, proc::LocoChannel::RightHip) > 0.05,
+                 "hip curves move");
+    stats.expect(curveSpread(knot, proc::LocoChannel::LeftKnee) > 0.15 && curveSpread(knot, proc::LocoChannel::RightKnee) > 0.15,
+                 "knee curves move");
+    stats.expect(curveSpread(knot, proc::LocoChannel::LeftAnkle) > 0.05 && curveSpread(knot, proc::LocoChannel::RightAnkle) > 0.05,
+                 "ankle curves move");
+    stats.expect(curveSpread(knot, proc::LocoChannel::LeftShoulder) > 0.05 && curveSpread(knot, proc::LocoChannel::RightShoulder) > 0.05,
+                 "shoulder curves move");
+    stats.expect(curveSpread(knot, proc::LocoChannel::LeftElbow) > 0.02 && curveSpread(knot, proc::LocoChannel::RightElbow) > 0.02,
+                 "elbow curves move");
+    stats.expect(curveSpread(knot, proc::LocoChannel::Pelvis) > 0.01 && curveSpread(knot, proc::LocoChannel::Spine1) > 0.01,
+                 "pelvis and spine curves move");
+    const auto left_knee_range = kneeFlexion(*regime, proc::JointId::LeftKnee);
+    const auto right_knee_range = kneeFlexion(*regime, proc::JointId::RightKnee);
+    stats.expect(left_knee_range.second && right_knee_range.second, "synthetic knee angles stay inside the hinge range");
+    stats.expect(left_knee_range.first < -25.0 && right_knee_range.first < -25.0, "synthetic knees enter the flexion side of the hinge");
+  }
+
+  proc::LocomotionState gait_state;
+  gait_state.fade = 1.0;
+  gait_state.regime = proc::LocomotionRegime::Walk;
+  gait_state.dimensionless_speed = demo.walk.knots.front().dimensionless_speed;
+  gait_state.phase = 0.0;
+  const proc::WorldPose phase0 = proc::forwardKinematics(neutral, proc::generateLocomotionPose(neutral, demo, gait_state).pose);
+  gait_state.phase = 0.5;
+  const proc::WorldPose phase_half = proc::forwardKinematics(neutral, proc::generateLocomotionPose(neutral, demo, gait_state).pose);
+  const double left_arm0 = phase0.joints[proc::jointIndex(proc::JointId::LeftElbow)].position.y -
+                           phase0.joints[proc::jointIndex(proc::JointId::LeftShoulder)].position.y;
+  const double right_arm0 = phase0.joints[proc::jointIndex(proc::JointId::RightElbow)].position.y -
+                            phase0.joints[proc::jointIndex(proc::JointId::RightShoulder)].position.y;
+  const double left_arm_half = phase_half.joints[proc::jointIndex(proc::JointId::LeftElbow)].position.y -
+                               phase_half.joints[proc::jointIndex(proc::JointId::LeftShoulder)].position.y;
+  const double right_arm_half = phase_half.joints[proc::jointIndex(proc::JointId::RightElbow)].position.y -
+                                phase_half.joints[proc::jointIndex(proc::JointId::RightShoulder)].position.y;
+  stats.expect(right_arm0 > left_arm0 + 0.02 && left_arm_half > right_arm_half + 0.02, "arms swing opposite each other across the stride");
+  stats.expect(phase0.joints[proc::jointIndex(proc::JointId::LeftFoot)].position.y > phase0.joints[proc::jointIndex(proc::JointId::LeftHip)].position.y &&
+                   right_arm0 > 0.0 && left_arm0 < 0.0,
+               "the right arm is forward while the left leg is forward");
+  stats.expect(phase0.joints[proc::jointIndex(proc::JointId::LeftElbow)].position.z <
+                       phase0.joints[proc::jointIndex(proc::JointId::LeftShoulder)].position.z - 0.15 &&
+                   phase0.joints[proc::jointIndex(proc::JointId::RightElbow)].position.z <
+                       phase0.joints[proc::jointIndex(proc::JointId::RightShoulder)].position.z - 0.15,
+               "both arms hang below the shoulders");
+
+  const proc::ConstraintAudit audit = proc::auditLocomotionModel(neutral, demo);
+  stats.expect(audit.ok && audit.violations == 0, "public synthetic model passes the neutral constraint audit");
+  proc::ProcLocomotionModel broken = demo;
+  broken.walk.knots.front().rotation[static_cast<int>(proc::LocoChannel::LeftKnee)][70] =
+      proc::quatLog(proc::quatAxisAngle(neutral.constraints[proc::jointIndex(proc::JointId::LeftKnee)].axis, 0.85));
+  const proc::ConstraintAudit broken_audit = proc::auditLocomotionModel(neutral, broken);
+  stats.expect(!broken_audit.ok && broken_audit.worst_joint == "lleglowj", "an inverted knee is reported by the audit");
+  stats.expect(broken_audit.worst_message.find("requested") != std::string::npos, "the audit keeps the requested angle");
+  const glm::dvec3 broken_sample = broken.walk.knots.front().rotation[static_cast<int>(proc::LocoChannel::LeftKnee)][70];
+  proc::LocomotionState broken_state = gait_state;
+  broken_state.phase = 0.70;
+  broken_state.dimensionless_speed = broken.walk.knots.front().dimensionless_speed;
+  const proc::GeneratedPoseResult warned = proc::generateConstrainedLocomotionPose(neutral, broken, broken_state, proc::LimitMode::Warn);
+  const proc::GeneratedPoseResult clamped =
+      proc::generateConstrainedLocomotionPose(neutral, broken, broken_state, proc::LimitMode::Clamp);
+  stats.expect(warned.limits.pose.local_rotation[proc::jointIndex(proc::JointId::LeftKnee)] ==
+                   warned.raw.local_rotation[proc::jointIndex(proc::JointId::LeftKnee)],
+               "WARN leaves the requested pose unchanged");
+  stats.expect(clamped.limits.clamped, "CLAMP reports that it changed the runtime pose");
+  const double clamped_knee = proc::hingeAngleDegrees(clamped.limits.pose.local_rotation[proc::jointIndex(proc::JointId::LeftKnee)],
+                                                      neutral.constraints[proc::jointIndex(proc::JointId::LeftKnee)].axis);
+  stats.expect(clamped_knee <= 10.0 + 1e-3 && clamped_knee >= -150.0, "CLAMP holds the knee inside the hinge");
+  stats.expect(broken.walk.knots.front().rotation[static_cast<int>(proc::LocoChannel::LeftKnee)][70] == broken_sample,
+               "CLAMP does not mutate the locomotion model");
+  const proc::ConstraintAudit short_audit = proc::auditLocomotionModel(short_legs, demo);
+  stats.expect(short_audit.poses == audit.poses, "the same model is audited on another body");
+  std::cout << proc::formatConstraintAudit(audit, "neutral");
 
   const std::filesystem::path generator_source = root / "src" / "locomotion" / "locomotion_generator.cpp";
   stats.expect(!fileHas(generator_source, "analysis/") && !fileHas(generator_source, "import/") &&

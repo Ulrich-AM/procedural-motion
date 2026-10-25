@@ -1,6 +1,8 @@
 #pragma once
 
+#include "body/joint_limits.h"
 #include "body/proc_body.h"
+#include "locomotion/locomotion_audit.h"
 #include "locomotion/locomotion_generator.h"
 #include "rig/forward_kinematics.h"
 #include "status.h"
@@ -36,11 +38,15 @@ struct GeneratorUi {
   glm::dvec3 previous_right{0.0};
   bool has_previous = false;
   std::string bake_status;
+  ConstraintAudit audit;
+  bool audit_valid = false;
+  std::string audited_body;
 };
 
 void loadLocomotionModel(GeneratorUi& ui, const std::filesystem::path& path);
 void drawGeneratorPanel(GeneratorUi& ui, GLFWwindow* window, const ProcBody* body, bool has_body,
-                        const std::filesystem::path& asset_root);
+                        const std::filesystem::path& asset_root, const std::filesystem::path& body_path, LimitMode* limit_mode,
+                        const LimitResult* limits);
 void accumulateGeneratorSlip(GeneratorUi& ui, const WorldPose& world, const Pose& pose, double dt);
 
 }  // namespace proc

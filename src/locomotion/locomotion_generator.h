@@ -1,5 +1,6 @@
 #pragma once
 
+#include "body/joint_limits.h"
 #include "body/proc_body.h"
 #include "locomotion/locomotion_model.h"
 #include "motion/proc_motion.h"
@@ -52,5 +53,15 @@ void advanceLocomotion(LocomotionState& state, const ProcLocomotionModel& model,
 LocomotionSample generateLocomotionPose(const ProcBody& body, const ProcLocomotionModel& model, const LocomotionState& state);
 
 ProcMotion bakeLocomotion(const ProcBody& body, const ProcLocomotionModel& model, LocomotionCommand command, double duration_s, double fps);
+
+struct GeneratedPoseResult {
+  Pose raw;
+  LimitResult limits;
+  LocomotionState state;
+};
+
+// Raw pose stays available. CLAMP rewrites only limits.pose. The model is not modified.
+GeneratedPoseResult generateConstrainedLocomotionPose(const ProcBody& body, const ProcLocomotionModel& model, const LocomotionState& state,
+                                                      LimitMode mode);
 
 }  // namespace proc

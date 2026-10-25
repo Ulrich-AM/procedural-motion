@@ -78,7 +78,8 @@ add_library(proc_runtime STATIC
   src/locomotion/locomotion_model_io.cpp
   src/locomotion/body_scale.cpp
   src/locomotion/locomotion_generator.cpp
-  src/locomotion/locomotion_diagnostics.cpp)
+  src/locomotion/locomotion_diagnostics.cpp
+  src/locomotion/locomotion_audit.cpp)
 target_include_directories(proc_runtime PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(proc_runtime PUBLIC glm::glm nlohmann_json::nlohmann_json)
 if(MSVC)
@@ -105,6 +106,7 @@ add_library(proc_core STATIC
   src/analysis/proc_analysis.cpp
   src/analysis/analysis_io.cpp
   src/analysis/locomotion_model_builder.cpp
+  src/analysis/synthetic_locomotion.cpp
   src/dataset/lafan1_index.cpp
   src/dataset/dataset_index.cpp
   src/dataset/batch_analyze.cpp)
@@ -137,6 +139,14 @@ add_executable(proc_motion_lab
 
 add_executable(proc_motion_model
   src/cli/proc_motion_model.cpp)
+
+add_executable(proc_synthetic_model
+  src/cli/proc_synthetic_model.cpp)
+target_link_libraries(proc_synthetic_model PRIVATE proc_core)
+if(MSVC)
+  target_compile_options(proc_synthetic_model PRIVATE /W4 /permissive-)
+  target_compile_definitions(proc_synthetic_model PRIVATE NOMINMAX)
+endif()
 target_link_libraries(proc_motion_model PRIVATE proc_core)
 if(MSVC)
   target_compile_options(proc_motion_model PRIVATE /W4 /permissive-)

@@ -1,5 +1,7 @@
 #include "analysis/analysis_io.h"
 #include "analysis/locomotion_model_builder.h"
+#include "body/proc_body.h"
+#include "locomotion/locomotion_audit.h"
 #include "locomotion/locomotion_model_io.h"
 
 #include <algorithm>
@@ -11,7 +13,7 @@ namespace {
 
 void printHelp() {
   std::cout << "proc_motion_model --input <analysis dir or file> --output <model.procloco.json> "
-               "[--min-quality 0] [--regime walk] [--subject name] [--bin-width 0.2]\n";
+               "[--min-quality 0] [--regime walk] [--subject name] [--bin-width 0.2] [--body neutral.procbody.json]\n";
 }
 
 std::string argument(int argc, char** argv, const std::string& name) {
@@ -46,6 +48,7 @@ int main(int argc, char** argv) {
   if (!argument(argc, argv, "--bin-width").empty()) settings.bin_width = std::stod(argument(argc, argv, "--bin-width"));
   settings.regime = argument(argc, argv, "--regime");
   settings.subject = argument(argc, argv, "--subject");
+  const std::filesystem::path body_path = argument(argc, argv, "--body");
 
   std::vector<std::filesystem::path> files;
   if (!std::filesystem::exists(input)) {
@@ -92,5 +95,16 @@ int main(int argc, char** argv) {
             << model.sprint.knots.size() << " cycles " << count(model.sprint) << "\nseam " << model.max_seam_error << " "
             << model.max_seam_channel << "\n";
   for (const std::string& warning : warnings) std::cout << "warning: " << warning << '\n';
+  if (!body_path.empty()) {
+    proc::ProcBody body;
+    const proc::Status body_status = proc::loadProcBodyFromFile(body_path, body);
+    if (!body_status.ok()) {
+      std::cerr << body_status.text() << '\n';
+      return 1;
+    }
+    const proc::ConstraintAudit audit = proc::auditLocomotionModel(body, model);
+    std::cout << proc::formatConstraintAudit(audit, body.name.empty() ? body_path.filename().string() : body.name);
+    std::cout << "audit does not modify the locomotion model\n";
+  }
   return 0;
 }

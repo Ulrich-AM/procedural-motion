@@ -289,6 +289,16 @@ LocomotionSample generateLocomotionPose(const ProcBody& body, const ProcLocomoti
   return generated;
 }
 
+GeneratedPoseResult generateConstrainedLocomotionPose(const ProcBody& body, const ProcLocomotionModel& model, const LocomotionState& state,
+                                                      LimitMode mode) {
+  GeneratedPoseResult result;
+  const LocomotionSample sample = generateLocomotionPose(body, model, state);
+  result.raw = sample.pose;
+  result.state = sample.state;
+  result.limits = applyJointLimits(body, sample.pose, mode);
+  return result;
+}
+
 ProcMotion bakeLocomotion(const ProcBody& body, const ProcLocomotionModel& model, LocomotionCommand command, double duration_s, double fps) {
   ProcMotion motion;
   motion.skeleton = body.skeleton.empty() ? kSkeletonId : body.skeleton;

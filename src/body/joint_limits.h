@@ -13,7 +13,13 @@ enum class LimitMode { Warn, Clamp };
 struct JointViolation {
   std::string joint;
   std::string message;
+  double requested_deg = 0.0;
+  double excess_deg = 0.0;
 };
+
+// Signed hinge angle about the constraint's own axis. Positive and negative
+// follow that axis. They are not a second, side-specific sign convention.
+double hingeAngleDegrees(const glm::dquat& rotation, const glm::dvec3& axis);
 
 struct LimitResult {
   Pose pose;

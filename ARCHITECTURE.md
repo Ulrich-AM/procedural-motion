@@ -96,6 +96,21 @@ Runtime phase samples are 100 unique values on `[0, 1)`. Phase advance uses `cad
 
 Walk, run, and sprint each store their observed dimensionless-speed support. Overlap blends the two regimes at the same phase. A gap becomes an inferred transition band. Hysteresis keeps a regime from flickering. Phase is not reset on a transition. Idle is a fade to the bind pose and does not need a clip.
 
-Heading is a runtime yaw of an otherwise straight gait. There is no turning step. Generated contacts are model probabilities written into `.procmo` with `source.type = procedural`. Foot slip is measured during those contacts and is not corrected. There is no foot IK, terrain, or physics.
+Heading is a runtime yaw of an otherwise straight gait. There is no turning step. Generated contacts are model probabilities written into `.procmo` with `source.type = procedural`. Foot slip is measured during those contacts and is not corrected. There is no foot IK, foot lock, terrain, or physics.
+
+The generator pose and the body-constrained pose stay separate:
+
+```text
+PROC_LOCOMOTION_MODEL
+  → raw generated pose
+  → PROC BODY joint constraints (WARN or CLAMP)
+  → runtime pose
+```
+
+WARN is the lab default. It reports a violation and leaves the requested pose unchanged. CLAMP rewrites the runtime pose for that frame and does not write the clamped values back into `.procloco`. The offline builder may audit a finished model against a reference body. It does not reshape curves to that body's limits, so the same model can be checked on another body later.
+
+`locomotion_audit` samples each regime, speed knot, and phase, runs the raw generator, and collects WARN violations. `proc_synthetic_model` is the only tool that regenerates `assets/models/synthetic_locomotion.procloco.json`. Unit tests write temporary models. The public file is synthetic repository data, not a measured gait.
+
+Hinge sign follows the axis stored on the PROC BODY. On the canonical skeleton both knees use `+X`, and negative rotation about that axis is flexion. Elbow axes point in opposite directions, so the same numeric quaternion sign is not assumed for both sides. The stored ranges are placeholders.
 
 The GUI import panel and the batch analyzer still each load and retarget a clip. They share the mapping and `SourceSemanticMap`. A single `processSourceMotion` helper is not worth a rewrite of the import UI. The lab separates PLAYBACK from GENERATOR so those controls stay apart.

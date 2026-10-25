@@ -52,6 +52,13 @@ double twistDegrees(const glm::dquat& twist, const glm::dvec3& axis) {
 
 }  // namespace
 
+double hingeAngleDegrees(const glm::dquat& rotation, const glm::dvec3& axis) {
+  glm::dquat swing;
+  glm::dquat twist;
+  swingTwist(rotation, axis, swing, twist);
+  return twistDegrees(twist, axis);
+}
+
 LimitResult applyJointLimits(const ProcBody& body, const Pose& pose, LimitMode mode) {
   LimitResult result;
   result.pose = pose;
@@ -80,14 +87,22 @@ LimitResult applyJointLimits(const ProcBody& body, const Pose& pose, LimitMode m
       const double off_axis = quatAngleDegrees(swing);
       const double angle = twistDegrees(twist, constraint.axis);
       if (off_axis > 1.0) {
-        result.violations.push_back(
-            {name, name + " off-axis rotation " + formatDeg(off_axis) + " deg exceeds hinge tolerance 1.0 deg"});
+        JointViolation violation;
+        violation.joint = name;
+        violation.requested_deg = off_axis;
+        violation.excess_deg = off_axis - 1.0;
+        violation.message = name + " off-axis rotation " + formatDeg(off_axis) + " deg exceeds hinge tolerance 1.0 deg";
+        result.violations.push_back(std::move(violation));
       }
       if (angle < constraint.min_deg || angle > constraint.max_deg) {
         const double limit = angle > constraint.max_deg ? constraint.max_deg : constraint.min_deg;
-        result.violations.push_back({name, name + " requested " + formatDeg(angle) + " deg\nallowed " +
-                                               (angle > constraint.max_deg ? "max " : "min ") + formatDeg(limit) +
-                                               " deg"});
+        JointViolation violation;
+        violation.joint = name;
+        violation.requested_deg = angle;
+        violation.excess_deg = std::abs(angle - limit);
+        violation.message = name + " requested " + formatDeg(angle) + " deg\nallowed " +
+                            (angle > constraint.max_deg ? "max " : "min ") + formatDeg(limit) + " deg";
+        result.violations.push_back(std::move(violation));
       }
       if (clamp && !result.violations.empty() && result.violations.back().joint == name) {
         const double clamped = std::clamp(angle, constraint.min_deg, constraint.max_deg);
@@ -107,13 +122,23 @@ LimitResult applyJointLimits(const ProcBody& body, const Pose& pose, LimitMode m
       bool violated = false;
       if (swing_deg > constraint.max_swing_deg + 1e-6) {
         violated = true;
-        result.violations.push_back({name, name + " requested " + formatDeg(swing_deg) + " deg\nallowed max " +
-                                                formatDeg(constraint.max_swing_deg) + " deg"});
+        JointViolation violation;
+        violation.joint = name;
+        violation.requested_deg = swing_deg;
+        violation.excess_deg = swing_deg - constraint.max_swing_deg;
+        violation.message = name + " requested " + formatDeg(swing_deg) + " deg\nallowed max " +
+                            formatDeg(constraint.max_swing_deg) + " deg";
+        result.violations.push_back(std::move(violation));
       }
       if (std::abs(twist_deg) > constraint.max_twist_deg + 1e-6) {
         violated = true;
-        result.violations.push_back({name, name + " twist requested " + formatDeg(twist_deg) + " deg\nallowed max " +
-                                                formatDeg(constraint.max_twist_deg) + " deg"});
+        JointViolation violation;
+        violation.joint = name;
+        violation.requested_deg = twist_deg;
+        violation.excess_deg = std::abs(twist_deg) - constraint.max_twist_deg;
+        violation.message = name + " twist requested " + formatDeg(twist_deg) + " deg\nallowed max " +
+                            formatDeg(constraint.max_twist_deg) + " deg";
+        result.violations.push_back(std::move(violation));
       }
       if (clamp && violated) {
         glm::dquat swung = swing;
