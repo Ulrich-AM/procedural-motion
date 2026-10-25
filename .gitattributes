@@ -1,5 +1,0 @@
-* text=auto
-*.bat text eol=crlf
-*.fbx binary
-*.dll binary
-*.lib binary

@@ -1,15 +1,33 @@
+# Build output
 build/
 out/
+bin/
+
+# IDE/editor
 .vs/
 .vscode/
-CMakeUserPresets.json
-CMakeCache.txt
-cmake-build-*/
+.idea/
 *.user
 *.suo
-imgui.ini
-*.bmp
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Generated/debug
+*.log
+*.obj
 *.pdb
 *.ilk
-*.exp
-*.obj
+*.exe
+*.dll
+*.lib
+
+# Local datasets / licensed assets
+datasets/
+local_assets/
+*.fbx
+*.bvh
+*.npz
