@@ -864,6 +864,51 @@ const ANGLE_LABEL = {
   forward: ["pitch down deg", "lateral deg (+X)"]
 };
 
+const BODY_PRESET_SPECS = {
+  neutral: {
+    label: "Neutral",
+    name: "neutral",
+    anthropometry: null,
+    ratios: {}
+  },
+  ansur_male_mean: {
+    label: "ANSUR II male mean",
+    name: "ansur_male_mean",
+    anthropometry: {
+      stature_m: 1.756,
+      shoulder_breadth_m: 0.492,
+      hip_breadth_m: 0.355,
+      hand_length_m: 0.190,
+      foot_length_m: 0.270,
+      head_height_m: 0.237
+    },
+    ratios: {
+      spine1b: 15.6/15.0, spine2b: 16.6/16.0, spine3b: 18.7/18.0,
+      neckb: 9.0/8.5, headb: 13.4/13.0,
+      legrootb: 10.7/10.5, leguppb: 40.7/41.0, leglowb: 43.4/41.8, footb: 20.3/19.5,
+      armrootb: 18.7/17.5, armuppb: 30.2/29.5, armlowb: 27.6/25.8, handb: 19.0/18.3
+    }
+  },
+  ansur_female_mean: {
+    label: "ANSUR II female mean",
+    name: "ansur_female_mean",
+    anthropometry: {
+      stature_m: 1.629,
+      shoulder_breadth_m: 0.434,
+      hip_breadth_m: 0.356,
+      hand_length_m: 0.176,
+      foot_length_m: 0.246,
+      head_height_m: 0.220
+    },
+    ratios: {
+      spine1b: 13.4/15.0, spine2b: 14.2/16.0, spine3b: 15.5/18.0,
+      neckb: 8.2/8.5, headb: 12.7/13.0,
+      legrootb: 10.7/10.5, leguppb: 40.6/41.0, leglowb: 41.9/41.8, footb: 18.4/19.5,
+      armrootb: 16.5/17.5, armuppb: 28.2/29.5, armlowb: 26.1/25.8, handb: 17.6/18.3
+    }
+  }
+};
+
 let body = structuredClone(NEUTRAL);
 let showJoints = true;
 let showBones = false;
@@ -884,6 +929,56 @@ function rad(d) { return d * Math.PI / 180; }
 function deg(r) { return r * 180 / Math.PI; }
 function boneOf(name) { return body.bones.find(b => b.name === name); }
 function jointOf(name) { return body.joints.find(j => j.name === name); }
+
+function baseBoneName(name) {
+  return (name[0] === "l" || name[0] === "r") ? name.slice(1) : name;
+}
+
+function makeBodyPreset(key) {
+  const spec = BODY_PRESET_SPECS[key] || BODY_PRESET_SPECS.neutral;
+  const doc = structuredClone(NEUTRAL);
+  doc.name = spec.name;
+
+  if (spec.anthropometry) {
+    Object.assign(doc.anthropometry, spec.anthropometry);
+    doc.anthropometry.description =
+      "ANSUR II external mean values where available. Skeleton segment lengths are derived modeling presets " +
+      "using published segment-proportion ratios; they are not direct ANSUR joint-center measurements.";
+    const statureScale = spec.anthropometry.stature_m / NEUTRAL.anthropometry.stature_m;
+    doc.anthropometry.chest_breadth_m = NEUTRAL.anthropometry.chest_breadth_m * statureScale;
+  }
+
+  for (const bone of doc.bones) {
+    const factor = spec.ratios[baseBoneName(bone.name)] ?? 1.0;
+    bone.rest_vector_m = bone.rest_vector_m.map(c => c * factor);
+    bone.length_m = mag(bone.rest_vector_m);
+    bone.rest_direction = norm(bone.rest_vector_m);
+    bone.locked = true;
+  }
+
+  const joints = new Map(doc.joints.map(j => [j.name, j]));
+  const positions = {legrootj: [0, 0, 0]};
+  for (const entry of BONES) {
+    const bone = doc.bones.find(b => b.name === entry[0]);
+    positions[entry[2]] = add(positions[entry[1]], bone.rest_vector_m);
+  }
+  const toeZ = Math.min(positions.ltoesj[2], positions.rtoesj[2]);
+  for (const point of Object.values(positions)) point[2] -= toeZ;
+  for (const [name, point] of Object.entries(positions)) joints.get(name).rest_position_m = point.slice();
+
+  if (spec.anthropometry) {
+    doc.anthropometry.arm_span_m = Math.abs(positions.rfingj[0] - positions.lfingj[0]);
+  }
+
+  const outgoing = new Map();
+  for (const bone of doc.bones) if (!outgoing.has(bone.parent_joint)) outgoing.set(bone.parent_joint, bone.rest_direction);
+  for (const constraint of doc.constraints) {
+    if (constraint.type === "ball" && outgoing.has(constraint.joint)) {
+      constraint.twist_axis = outgoing.get(constraint.joint).slice();
+    }
+  }
+  return doc;
+}
 
 function finalize() {
   const pos = {legrootj: jointOf("legrootj").rest_position_m.slice()};
@@ -1106,9 +1201,32 @@ function rebuild() {
   const bonesBox = checkbox("bone names + lengths", showBones, (v) => { showBones = v; draw(); });
   side.appendChild(jointsBox); side.appendChild(bonesBox);
 
+  side.appendChild(el("h2", "BODY PRESET"));
+  const presetSelect = document.createElement("select");
+  for (const [key, spec] of Object.entries(BODY_PRESET_SPECS)) {
+    const option = document.createElement("option");
+    option.value = key;
+    option.textContent = spec.label;
+    if (body.name === spec.name) option.selected = true;
+    presetSelect.appendChild(option);
+  }
+  presetSelect.addEventListener("change", () => {
+    body = makeBodyPreset(presetSelect.value);
+    rebuild();
+  });
+  side.appendChild(presetSelect);
+  const presetNote = el("p",
+    "ANSUR presets use measured external means where available. Skeletal lengths are derived modeling values and stay explicitly separate from anthropometry.");
+  presetNote.className = "note";
+  side.appendChild(presetNote);
+
   side.appendChild(el("h2", "FILE"));
-  const preset = el("button", "Neutral preset");
-  preset.onclick = () => { body = structuredClone(NEUTRAL); rebuild(); };
+  const resetPreset = el("button", "Reset selected preset");
+  resetPreset.onclick = () => {
+    const key = Object.keys(BODY_PRESET_SPECS).find(k => BODY_PRESET_SPECS[k].name === body.name) || "neutral";
+    body = makeBodyPreset(key);
+    rebuild();
+  };
   const file = document.createElement("input"); file.type = "file"; file.accept = ".json,application/json";
   file.addEventListener("change", () => {
     const picked = file.files[0]; if (!picked) return;
@@ -1129,7 +1247,7 @@ function rebuild() {
     link.download = (doc.name || "body") + ".procbody.json";
     link.click();
   };
-  side.appendChild(preset); side.appendChild(file); side.appendChild(document.createElement("br")); side.appendChild(exportButton);
+  side.appendChild(resetPreset); side.appendChild(file); side.appendChild(document.createElement("br")); side.appendChild(exportButton);
   side.appendChild(el("h2", "VALIDATION"));
   const errors = el("div"); errors.id = "errors"; side.appendChild(errors);
   refreshStatus();

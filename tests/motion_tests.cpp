@@ -159,6 +159,19 @@ int runMotionTests() {
   player.update(2.25);
   stats.expect(std::abs(player.time() - 0.25) < 1e-6, "loop wraps inside duration");
 
+  proc::ProcMotion oversized_tail = minimal;
+  oversized_tail.duration_s = 30.0;
+  proc::MotionPlayer guarded_player;
+  guarded_player.setMotion(&oversized_tail);
+  guarded_player.setLoop(true);
+  guarded_player.play();
+  guarded_player.update(1.25);
+  stats.expect(std::abs(guarded_player.time() - 0.25) < 1e-6,
+               "loop ignores an unreasonable declared tail beyond the last sampled frame");
+  guarded_player.seekSeconds(12.25);
+  stats.expect(std::abs(guarded_player.time() - 0.25) < 1e-6,
+               "loop seek also ignores an unreasonable declared tail");
+
   proc::ProcBody body;
   const proc::Status body_status =
       proc::loadProcBodyFromFile(sourceRoot() / "assets" / "bodies" / "neutral.procbody.json", body);

@@ -97,6 +97,8 @@ int runRetargetTests() {
   stats.expect(retarget_status.ok(), retarget_status.text());
   stats.expect(report.rest_max_error_deg < 1e-4, "rest error " + std::to_string(report.rest_max_error_deg));
   stats.expect(report.non_root_translations_exported == 0, "no exported non-root translation");
+  stats.expect(std::abs(motion.duration_s - motion.frames.back().time) < 1e-12,
+               "retarget duration ends at the last exported sample");
 
   const int hip = *proc::findJoint("lleguppj");
   const int knee = *proc::findJoint("lleglowj");

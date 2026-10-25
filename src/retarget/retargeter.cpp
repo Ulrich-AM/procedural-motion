@@ -92,7 +92,7 @@ Status retargetClip(const ProcBody& body, const SourceClip& clip, const std::arr
   motion.source.clip = clip.name;
   motion.fps = clip.nominal_fps > 0.0 ? clip.nominal_fps : 30.0;
   motion.frame_count = static_cast<int>(clip.frames.size());
-  motion.duration_s = std::max(clip.duration, static_cast<double>(motion.frame_count) / motion.fps);
+  motion.duration_s = 0.0;
   motion.frames.reserve(clip.frames.size());
 
   const int source_root = mapping[kRootJoint];
@@ -128,8 +128,12 @@ Status retargetClip(const ProcBody& body, const SourceClip& clip, const std::arr
     motion.frames.push_back(pose);
   }
 
-  if (!motion.frames.empty() && motion.frames.back().time > motion.duration_s) {
-    motion.duration_s = motion.frames.back().time;
+  if (!motion.frames.empty()) {
+    // The playable PROC timeline is defined by the samples we actually
+    // exported, not by potentially longer source-container metadata.
+    // This prevents imported clips from freezing on their final pose while
+    // the playback clock waits for an oversized declared duration to expire.
+    motion.duration_s = motion.frames.size() > 1 ? motion.frames.back().time : 1.0 / motion.fps;
   }
   report.translation_notes = clip.translation_notes;
   report.non_root_translations_exported = 0;

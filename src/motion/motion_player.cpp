@@ -4,6 +4,32 @@
 #include <cmath>
 
 namespace proc {
+namespace {
+
+double effectiveLoopDuration(const ProcMotion& motion) {
+  if (motion.frames.empty()) return 0.0;
+  const double start = motion.frames.front().time;
+  const double end = motion.frames.back().time;
+  const double frame_span = std::max(0.0, end - start);
+  if (frame_span <= 1e-9) {
+    if (std::isfinite(motion.duration_s) && motion.duration_s > 1e-9) return motion.duration_s;
+    return motion.fps > 1e-9 ? 1.0 / motion.fps : 0.0;
+  }
+
+  const double nominal_step = motion.fps > 1e-9 ? 1.0 / motion.fps : 0.0;
+  const double allowed_tail = nominal_step > 0.0 ? nominal_step * 1.5 : std::max(frame_span * 0.05, 1e-6);
+  const double declared = motion.duration_s;
+
+  // A normal sampled loop may deliberately reserve about one frame between
+  // the last sample and frame zero. Large tails usually come from importer
+  // metadata and would freeze the final pose before the loop wraps.
+  if (!std::isfinite(declared) || declared < frame_span - 1e-9 || declared > frame_span + allowed_tail) {
+    return frame_span;
+  }
+  return declared;
+}
+
+}  // namespace
 
 void MotionPlayer::setMotion(const ProcMotion* motion) {
   motion_ = motion;
@@ -31,9 +57,10 @@ void MotionPlayer::seekSeconds(double time_s) {
   }
   const double start = motion_->frames.front().time;
   const double end = motion_->frames.back().time;
-  if (loop_ && motion_->duration_s > 1e-8) {
-    double wrapped = std::fmod(time_s - start, motion_->duration_s);
-    if (wrapped < 0.0) wrapped += motion_->duration_s;
+  const double loop_duration = effectiveLoopDuration(*motion_);
+  if (loop_ && loop_duration > 1e-8) {
+    double wrapped = std::fmod(time_s - start, loop_duration);
+    if (wrapped < 0.0) wrapped += loop_duration;
     time_ = start + wrapped;
   } else {
     time_ = std::clamp(time_s, start, end);
@@ -85,9 +112,10 @@ void MotionPlayer::update(double dt_s) {
   time_ += dt_s * speed_;
   const double start = motion_->frames.front().time;
   const double end = motion_->frames.back().time;
-  if (loop_ && motion_->duration_s > 1e-8) {
-    double wrapped = std::fmod(time_ - start, motion_->duration_s);
-    if (wrapped < 0.0) wrapped += motion_->duration_s;
+  const double loop_duration = effectiveLoopDuration(*motion_);
+  if (loop_ && loop_duration > 1e-8) {
+    double wrapped = std::fmod(time_ - start, loop_duration);
+    if (wrapped < 0.0) wrapped += loop_duration;
     time_ = start + wrapped;
   } else if (time_ >= end) {
     time_ = end;
