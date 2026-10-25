@@ -6,6 +6,7 @@
 #include "render/renderer.h"
 #include "render/skeleton_renderer.h"
 #include "rig/forward_kinematics.h"
+#include "app/analysis_panel.h"
 #include "app/import_panel.h"
 #include "retarget/retargeter.h"
 #include "validation/bone_length_monitor.h"
@@ -144,6 +145,7 @@ struct LabState {
   LimitResult limits;
   bool pose_ready = false;
   ImportSession import;
+  AnalysisUi analysis_ui;
   glm::mat4 view{1.0f};
   glm::mat4 projection{1.0f};
 };
@@ -174,6 +176,7 @@ void loadBody(LabState& lab, const std::filesystem::path& path) {
   }
   lab.body = std::move(body);
   lab.has_body = true;
+  lab.analysis_ui.valid = false;
   lab.target = lab.body.joints[kRootJoint].rest_position;
   if (lab.import.has_source) {
     retargetCurrent(lab.import, lab.body, lab.motion, lab.has_motion, lab.motion_path, lab.motion_status, lab.player);
@@ -190,6 +193,7 @@ void loadMotion(LabState& lab, const std::filesystem::path& path) {
   Status status = loadProcMotionFromFile(path, motion);
   lab.motion_status = status;
   lab.motion_path = path;
+  lab.analysis_ui.valid = false;
   if (!status.ok()) {
     lab.has_motion = false;
     lab.player.setMotion(nullptr);
@@ -385,7 +389,12 @@ void drawSidePanel(LabState& lab) {
   const ImportResult imported = drawImportPanel(lab.import, lab.window, lab.has_body ? &lab.body : nullptr, lab.has_body,
                                                 lab.asset_root, lab.motion, lab.has_motion, lab.motion_path,
                                                 lab.motion_status, lab.player);
-  if (imported.replaced_motion) rebuildTrajectory(lab);
+  if (imported.replaced_motion) {
+    rebuildTrajectory(lab);
+    lab.analysis_ui.valid = false;
+  }
+  drawAnalysisSection(lab.analysis_ui, lab.import.has_source ? &lab.import.clip : nullptr, lab.has_motion ? &lab.motion : nullptr,
+                      lab.player, lab.asset_root);
 }
 
 void drawTransport(LabState& lab) {
@@ -417,6 +426,9 @@ void drawTransport(LabState& lab) {
   if (ImGui::SliderFloat("##timeline", &time_s, start, std::max(start + 0.001f, end), "time %.3f s")) {
     lab.player.seekSeconds(time_s);
   }
+  const ImVec2 timeline_min = ImGui::GetItemRectMin();
+  const ImVec2 timeline_max = ImGui::GetItemRectMax();
+  drawAnalysisOverlay(lab.analysis_ui, lab.player, timeline_min.x, timeline_min.y, timeline_max.x, timeline_max.y);
   if (!enabled) ImGui::EndDisabled();
 }
 

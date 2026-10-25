@@ -1,5 +1,5 @@
 PROC Motion Lab
-Third-party notices for the v0.1.0 Windows binary
+Third-party notices for the v0.2.0 Windows binary
 
 This application is statically linked with the libraries below. Their license
 texts are reproduced here because those licenses require the notice to travel

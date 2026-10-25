@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(procedural-motion VERSION 0.1.0 LANGUAGES CXX)
+project(procedural-motion VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -79,7 +79,20 @@ add_library(proc_core STATIC
   src/import/fbx_importer.cpp
   src/retarget/retarget_profile.cpp
   src/retarget/retargeter.cpp
-  src/retarget/retarget_diagnostics.cpp)
+  src/retarget/retarget_diagnostics.cpp
+  src/analysis/signal_processing.cpp
+  src/analysis/ground_estimator.cpp
+  src/analysis/contact_detector.cpp
+  src/analysis/gait_events.cpp
+  src/analysis/measurements.cpp
+  src/analysis/phase_normalizer.cpp
+  src/analysis/gait_cycles.cpp
+  src/analysis/relationship_model.cpp
+  src/analysis/proc_analysis.cpp
+  src/analysis/analysis_io.cpp
+  src/dataset/lafan1_index.cpp
+  src/dataset/dataset_index.cpp
+  src/dataset/batch_analyze.cpp)
 target_include_directories(proc_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(proc_core PUBLIC glm::glm nlohmann_json::nlohmann_json assimp::assimp)
 if(MSVC)
@@ -103,8 +116,17 @@ add_executable(proc_motion_lab
   src/main.cpp
   src/app/application.cpp
   src/app/import_panel.cpp
+  src/app/analysis_panel.cpp
   src/render/renderer.cpp
   src/render/skeleton_renderer.cpp)
+
+add_executable(proc_motion_analyze
+  src/cli/proc_motion_analyze.cpp)
+target_link_libraries(proc_motion_analyze PRIVATE proc_core)
+if(MSVC)
+  target_compile_options(proc_motion_analyze PRIVATE /W4 /permissive-)
+  target_compile_definitions(proc_motion_analyze PRIVATE NOMINMAX)
+endif()
 target_link_libraries(proc_motion_lab PRIVATE proc_core imgui_lib glfw opengl32 comdlg32 shell32)
 if(MSVC)
   target_compile_options(proc_motion_lab PRIVATE /W4 /permissive-)
@@ -120,7 +142,13 @@ add_executable(proc_motion_tests
   tests/motion_tests.cpp
   tests/bvh_tests.cpp
   tests/retarget_tests.cpp
-  tests/import_tests.cpp)
+  tests/import_tests.cpp
+  tests/analysis_signal_tests.cpp
+  tests/contact_tests.cpp
+  tests/gait_event_tests.cpp
+  tests/gait_cycle_tests.cpp
+  tests/relationship_tests.cpp
+  tests/dataset_index_tests.cpp)
 target_link_libraries(proc_motion_tests PRIVATE proc_core)
 target_compile_definitions(proc_motion_tests PRIVATE PROCMOTION_SOURCE_DIR="${PROCMOTION_SOURCE_DIR_FWD}")
 if(MSVC)

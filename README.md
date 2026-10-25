@@ -290,7 +290,7 @@ The LAFAN profile treats the file as Y-up, +Z forward, centimeters. That axis ch
 These are part of Phase 2, not defects to hide:
 
 - Feet can slide. There is no foot IK and no foot lock.
-- Contacts are not inferred.
+- `.procmo` does not store contacts. Phase 3 writes detected contacts into a separate `PROC_ANALYSIS` file.
 - A shorter or longer PROC leg will not reproduce the source stride length.
 - Root travel is the source's metric travel. It is not scaled to the target.
 - Joint limits are still the Phase 1 placeholders.
@@ -308,10 +308,80 @@ These are part of Phase 2, not defects to hide:
 
 ## Non-goals
 
-This tree does not implement MuJoCo, Box2D, rigid-body physics, balance or stepping controllers, SIMBICON, procedural walking, gait-cycle segmentation, automatic contact detection, foot IK, foot locking, terrain adaptation, a motion-matching database, active ragdoll, AMASS, SMPL, video pose detection, MediaPipe, machine learning, mesh skinning, a Y-Bot mesh, or auto-rigging.
+This tree does not implement MuJoCo, Box2D, rigid-body physics, balance or stepping controllers, SIMBICON, procedural walking, foot IK, foot locking, terrain reconstruction, a motion-matching database, active ragdoll, AMASS, SMPL, video pose detection, MediaPipe, machine learning, mesh skinning, a Y-Bot mesh, or auto-rigging.
+
+Phase 3 observes gait. It does not generate a walk or a run.
 
 ## Roadmap
 
-Phase 3 is dataset indexing, motion classification, foot-contact detection, gait-cycle segmentation, phase normalization, and locomotion measurements: joint and pelvis curves, and speed, stride, and cadence. It is not started here.
+Phase 4 is not started. The next step is an architectural audit of PROC BODY, PROC MOTION, SourceClip, the importers, the retargeter, MotionPlayer, PROC ANALYSIS, the dataset layer, and the GUI/CLI boundary. A procedural generator waits until that review.
 
-Later work can cover AMASS conversion, reference-derived procedural locomotion, physical compliance, a disturbance and reaction layer, and an active ragdoll.
+## Phase 3 — motion analysis and gait extraction
+
+Phase 3 watches imported locomotion. It detects contacts, splits same-side strides, normalizes them by phase, and stores measurements and simple speed relationships. It does not synthesize a pose.
+
+`.procmo` stays a motion file. Analysis lives in `PROC_ANALYSIS` version 1 (`.procanalysis.json`). Detected contacts, confidence, rejected cycles, and fitted relationships are not written back into the motion.
+
+### What is measured where
+
+Source geometry is measured on the `SourceClip`: foot and toe position, the virtual heel, root travel, ground height, contacts, and source leg length. Those numbers stay the same if the loaded PROC body changes from Neutral to an ANSUR preset.
+
+Joint rotation is measured on the retargeted PROC pose: pelvis, spine, hips, knees, ankles, shoulders, and elbows. Rotations are stored as a normalized quaternion plus a hemisphere-continuous log vector. If `dot(previous, current)` is negative, `current` is negated before the log. Scalar plots use the local X component of that log as sagittal flexion. Pelvis roll is the local Y component. Raw quaternion components are not averaged.
+
+Source leg length is the mean of the available sides of rest `(hip → knee) + (knee → ankle)` on the source skeleton. Normalized stride, step, clearance, and pelvis height divide by that length. Normalized speed is the Froude number `speed / sqrt(9.80665 * source_leg_length)`. Metric and normalized values use different fields.
+
+### Signals, ground, contacts
+
+Positions are smoothed with a short symmetric window specified in seconds (default 50 ms), then differentiated with a central difference, then the velocity is smoothed again (default 30 ms).
+
+Ground height is one number. It comes from the lower envelope of the foot, toe, and heel heights, preferring samples that are also slow. The file stores a confidence. A spread-out lower envelope (stairs, obstacles, jumps) is reported as low confidence. There is no terrain mesh.
+
+PROC has no heel bone. The analyzer places a virtual heel behind the source ankle, opposite the toe, at `heel_fraction` (default 0.22) of the source foot length. The analysis records `inferred_virtual`.
+
+Contact is a confidence in `[0, 1]` from height above the estimated ground, horizontal speed, vertical speed, and a short temporal window, then a binary state with enter/exit hysteresis. Single support, double support, and flight are all valid. A run is not forced onto the ground.
+
+### Events, cycles, phase
+
+Events are `initial_contact` and `toe_off`, with time, frame, side, and confidence. Timing is refined inside a short window around the threshold crossing. A stride is one side's initial contact to the next initial contact on that side. A cycle is accepted or rejected with a reason (duration, missing event, standing, insufficient travel, ambiguous contacts, low confidence, jump interruption, turning). Turning cycles stay in the file and are left out of the straight-regime fits.
+
+Accepted cycles are resampled to 101 phase samples. Phase 0 and 1 are successive initial contacts on the same side. Right cycles also get a canonical copy: roll is negated and the stance leg is swapped into the reference-side curves. The original side is kept.
+
+Relationships are per regime (`walk`, `run`, `sprint`), from accepted straight cycles. Each fit stores the sample count, speed range, median, percentiles, 0.25 m/s bins, and a straight-line fit with `r²` when there are at least two speeds. Walk and run are not pooled. There is no machine learning.
+
+Quality is stored as contact, timing, heading, continuity, and overall.
+
+Manual edits set `manual_override` and keep the automatic time, type, acceptance, or contact state beside the edited value.
+
+### Dataset index and batch tool
+
+`proc_motion_analyze.exe` scans a directory, imports each clip, retargets it, and writes:
+
+```text
+analysis_output/
+  index.json
+  clips/<clip>.procanalysis.json
+  tables/gait_cycles.csv
+  models/walk_reference.json
+  models/run_reference.json
+  models/sprint_reference.json
+  summary.txt
+```
+
+Example:
+
+```text
+proc_motion_analyze.exe --input datasets\lafan1 --profile lafan1 --output analysis_output\lafan1 --theme Walk
+```
+
+One bad file is recorded and the scan continues. LAFAN names such as `walk1_subject2` and `fallAndGetUp1_subject3` fill theme, take, and subject. A dance clip is not turned into walk cycles just because it imported. `datasets/`, `local_assets/`, `converted/`, `imports/`, and `analysis_output/` stay untracked. Repository tests build `synthetic_walk`, `synthetic_run`, and `synthetic_non_gait` in `tests/synthetic_gait.h`.
+
+The lab's ANALYSIS section runs the same core on the loaded source clip, plots the main signals, draws event marks on the timeline, and can step an event, change its type, or accept or reject a cycle.
+
+### Known limitations
+
+- Ground is one height. Uneven terrain is a low-confidence flag, not a surface.
+- Relationships are for approximately straight locomotion. Turning is rejected from those fits and kept in the cycle list.
+- The heel is not a tracked joint.
+- Smoothing can move a contact edge by about one or two samples. On the synthetic walk that offset is 40 ms.
+- Filename theme does not override the contact evidence.
+- Phase 3 does not generate locomotion, lock the feet, or build a controller.

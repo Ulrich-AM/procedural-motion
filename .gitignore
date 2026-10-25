@@ -32,6 +32,8 @@ datasets/
 local_assets/
 converted/
 imports/
+analysis_output/
+dist/
 *.fbx
 *.bvh
 *.npz
