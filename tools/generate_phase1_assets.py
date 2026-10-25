@@ -19,19 +19,23 @@ SKELETON = "proc_humanoid_v0"
 # external anthropometry block.
 JOINTS = {
     "legrootj": (0.0, 0.0, 0.992),
-    "spine1j": (0.0, -0.024, 1.114),
-    "spine2j": (0.0, 0.018, 1.252),
-    "armrootj": (0.0, -0.030, 1.406),
-    "neckj": (0.008, 0.014, 1.512),
-    "headj": (-0.010, 0.034, 1.730),
+    # Mild sagittal curve. Keep the neutral torso centered on X and avoid
+    # alternating large spine angles that make a three-bone spine look kinked.
+    "spine1j": (0.0, -0.010, 1.116),
+    "spine2j": (0.0, -0.004, 1.260),
+    "armrootj": (0.0, 0.006, 1.421),
+    "neckj": (0.0, 0.018, 1.535),
+    "headj": (0.0, 0.036, 1.754),
     "lleguppj": (-0.096, -0.018, 0.928),
     "lleglowj": (-0.072, 0.014, 0.500),
     "lfootj": (-0.088, -0.006, 0.082),
     "ltoesj": (-0.086, 0.196, 0.000),
-    "larmuppj": (-0.188, -0.010, 1.384),
-    "larmlowj": (-0.496, 0.006, 1.356),
-    "lhandj": (-0.748, 0.020, 1.346),
-    "lfingj": (-0.852, 0.040, 1.340),
+    # Translate the arm chain with armrootj so the existing shoulder/arm
+    # rest vectors and lengths remain unchanged.
+    "larmuppj": (-0.188, 0.026, 1.399),
+    "larmlowj": (-0.496, 0.042, 1.371),
+    "lhandj": (-0.748, 0.056, 1.361),
+    "lfingj": (-0.852, 0.076, 1.355),
 }
 
 MIRROR = {
