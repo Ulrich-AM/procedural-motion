@@ -31,6 +31,7 @@ int runGaitEventTests() {
   proc::AnalysisInput input;
   input.source = &walk.source;
   input.motion = &walk.motion;
+  input.semantics = proc::test::syntheticSemantics();
   const proc::ProcAnalysis analysis = proc::analyzeClip(input);
   const std::vector<double> left_ic = timesOf(analysis, "left", "initial_contact");
   const std::vector<double> left_to = timesOf(analysis, "left", "toe_off");

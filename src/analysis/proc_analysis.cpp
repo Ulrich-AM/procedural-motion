@@ -9,64 +9,27 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cctype>
 
 namespace proc {
 namespace {
 
-constexpr const char* kRotNames[kRotChannelCount] = {
-    "legrootj", "spine1j", "spine2j", "lleguppj", "rleguppj", "lleglowj", "rleglowj",
-    "lfootj",   "rfootj",  "larmuppj", "rarmuppj", "larmlowj", "rarmlowj"};
+constexpr JointId kRotJoints[kRotChannelCount] = {
+    JointId::LegRoot, JointId::Spine1, JointId::Spine2, JointId::LeftHip, JointId::RightHip, JointId::LeftKnee,
+    JointId::RightKnee, JointId::LeftFoot, JointId::RightFoot, JointId::LeftShoulder, JointId::RightShoulder,
+    JointId::LeftElbow, JointId::RightElbow};
 
-std::string foldName(std::string name) {
-  const std::size_t colon = name.rfind(':');
-  if (colon != std::string::npos) name = name.substr(colon + 1);
-  if (name.rfind("mixamorig", 0) == 0) name = name.substr(9);
-  for (char& character : name) {
-    character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-  }
-  return name;
-}
+constexpr const char* kContactRebuildNote =
+    "Contact edit rebuilt gait events and cycles. Previous downstream event/cycle overrides were cleared.";
+constexpr const char* kEventRebuildNote =
+    "Event edit rebuilt gait cycles and relationships. Previous cycle overrides were cleared.";
+constexpr const char* kCycleRebuildNote = "Cycle decision updated mirrored copies and relationships.";
 
-int findSource(const SourceClip& clip, std::initializer_list<const char*> names) {
-  for (int index = 0; index < static_cast<int>(clip.joints.size()); ++index) {
-    const std::string folded = foldName(clip.joints[static_cast<std::size_t>(index)].name);
-    for (const char* name : names) {
-      if (folded == name) return index;
-    }
-  }
-  return -1;
-}
-
-struct MarkerIds {
-  int root = -1;
-  int left_hip = -1;
-  int left_knee = -1;
-  int left_foot = -1;
-  int left_toe = -1;
-  int right_hip = -1;
-  int right_knee = -1;
-  int right_foot = -1;
-  int right_toe = -1;
-};
-
-MarkerIds resolveIds(const SourceClip& clip, std::vector<std::string>& warnings) {
-  MarkerIds ids;
-  ids.root = findSource(clip, {"hips", "hip", "pelvis", "root", "legrootj"});
-  ids.left_hip = findSource(clip, {"leftupleg", "leftupperleg", "lleguppj"});
-  ids.left_knee = findSource(clip, {"leftleg", "leftlowerleg", "lleglowj"});
-  ids.left_foot = findSource(clip, {"leftfoot", "lfootj"});
-  ids.left_toe = findSource(clip, {"lefttoe", "lefttoebase", "lefttoeend", "ltoesj"});
-  ids.right_hip = findSource(clip, {"rightupleg", "rightupperleg", "rleguppj"});
-  ids.right_knee = findSource(clip, {"rightleg", "rightlowerleg", "rleglowj"});
-  ids.right_foot = findSource(clip, {"rightfoot", "rfootj"});
-  ids.right_toe = findSource(clip, {"righttoe", "righttoebase", "righttoeend", "rtoesj"});
-  if (ids.root < 0) warnings.push_back("source root was not found; root trajectory stays at the origin");
-  if (ids.left_foot < 0) warnings.push_back("left foot was not found; left contact is unavailable");
-  if (ids.right_foot < 0) warnings.push_back("right foot was not found; right contact is unavailable");
-  if (ids.left_toe < 0) warnings.push_back("left toe was not found; the left toe copies the ankle and the heel offset uses a default");
-  if (ids.right_toe < 0) warnings.push_back("right toe was not found; the right toe copies the ankle and the heel offset uses a default");
-  return ids;
+void warnMissingSemantics(const SourceSemanticMap& ids, std::vector<std::string>& warnings) {
+  if (ids.root < 0) warnings.push_back("source root was not mapped; root trajectory stays at the origin");
+  if (ids.left_foot < 0) warnings.push_back("left foot was not mapped; left contact is unavailable");
+  if (ids.right_foot < 0) warnings.push_back("right foot was not mapped; right contact is unavailable");
+  if (ids.left_toe < 0) warnings.push_back("left toe was not mapped; the left toe copies the ankle and the heel offset uses a default");
+  if (ids.right_toe < 0) warnings.push_back("right toe was not mapped; the right toe copies the ankle and the heel offset uses a default");
 }
 
 glm::dvec3 positionAt(const SourceFrame& frame, int index) {
@@ -114,11 +77,11 @@ void fillRotations(ProcAnalysis& analysis, const ProcMotion* motion) {
   }
   std::array<glm::dquat, kRotChannelCount> previous;
   previous.fill(quatIdentity());
-  const int joints[kRotChannelCount] = {0, 1, 2, 6, 10, 7, 11, 8, 12, 14, 18, 15, 19};
   for (SignalFrame& frame : analysis.signals) {
     const Pose pose = sampleMotion(*motion, frame.time, false);
     for (int channel = 0; channel < kRotChannelCount; ++channel) {
-      glm::dquat rotation = channel == static_cast<int>(RotChannel::Pelvis) ? pose.root_rotation : pose.local_rotation[joints[channel]];
+      const int joint = jointIndex(kRotJoints[channel]);
+      glm::dquat rotation = channel == static_cast<int>(RotChannel::Pelvis) ? pose.root_rotation : pose.local_rotation[joint];
       rotation = hemisphereContinuous(previous[static_cast<std::size_t>(channel)], rotation);
       previous[static_cast<std::size_t>(channel)] = rotation;
       frame.rotation[static_cast<std::size_t>(channel)] = rotation;
@@ -152,7 +115,7 @@ std::vector<double> timesOf(const ProcAnalysis& analysis) {
 const char* rotChannelName(RotChannel channel) {
   const int index = static_cast<int>(channel);
   if (index < 0 || index >= kRotChannelCount) return "unknown";
-  return kRotNames[index];
+  return kJointNames[jointIndex(kRotJoints[index])];
 }
 
 int nearestFrame(const ProcAnalysis& analysis, double time_s) {
@@ -188,7 +151,8 @@ ProcAnalysis analyzeClip(const AnalysisInput& input, const AnalysisSettings& set
   analysis.source.frame_count = static_cast<int>(clip.frames.size());
   analysis.source.duration_s = clip.duration > 0.0 ? clip.duration : clip.frames.back().time;
 
-  const MarkerIds ids = resolveIds(clip, analysis.warnings);
+  const SourceSemanticMap ids = input.semantics;
+  warnMissingSemantics(ids, analysis.warnings);
   const double left_leg = limbLength(clip, ids.left_hip, ids.left_knee, ids.left_foot);
   const double right_leg = limbLength(clip, ids.right_hip, ids.right_knee, ids.right_foot);
   if (left_leg > 0.0 && right_leg > 0.0) analysis.source_leg_length_m = 0.5 * (left_leg + right_leg);
@@ -329,51 +293,137 @@ ProcAnalysis analyzeClip(const AnalysisInput& input, const AnalysisSettings& set
   return analysis;
 }
 
-void moveEvent(ProcAnalysis& analysis, int event_index, double time_s) {
-  if (event_index < 0 || event_index >= static_cast<int>(analysis.events.size()) || analysis.signals.empty()) return;
-  GaitEvent& event = analysis.events[static_cast<std::size_t>(event_index)];
-  const double start = analysis.signals.front().time;
-  const double end = analysis.signals.back().time;
-  event.time = std::clamp(time_s, start, end);
-  event.frame = nearestFrame(analysis, event.time);
-  event.time = analysis.signals[static_cast<std::size_t>(event.frame)].time;
-  event.manual_override = true;
+namespace {
+
+void applyContactOverrides(ProcAnalysis& analysis) {
+  for (ContactTrack& track : analysis.contacts) {
+    track.contact = track.automatic_contact;
+    track.manual_override = false;
+  }
+  for (const ContactOverride& range : analysis.contact_overrides) {
+    for (ContactTrack& track : analysis.contacts) {
+      if (track.marker != range.marker || track.contact.empty()) continue;
+      const int last = static_cast<int>(track.contact.size()) - 1;
+      int frame0 = std::clamp(range.frame0, 0, last);
+      int frame1 = std::clamp(range.frame1, 0, last);
+      if (frame1 < frame0) std::swap(frame0, frame1);
+      for (int frame = frame0; frame <= frame1; ++frame) track.contact[static_cast<std::size_t>(frame)] = range.contact ? 1 : 0;
+      track.manual_override = true;
+    }
+  }
 }
 
-void setEventType(ProcAnalysis& analysis, int event_index, const std::string& type) {
-  if (event_index < 0 || event_index >= static_cast<int>(analysis.events.size())) return;
-  if (type != "initial_contact" && type != "toe_off") return;
-  GaitEvent& event = analysis.events[static_cast<std::size_t>(event_index)];
-  event.type = type;
-  event.manual_override = true;
+void sortEvents(ProcAnalysis& analysis) {
+  std::stable_sort(analysis.events.begin(), analysis.events.end(), [](const GaitEvent& a, const GaitEvent& b) {
+    if (a.time != b.time) return a.time < b.time;
+    if (a.side != b.side) return a.side < b.side;
+    return a.type < b.type;
+  });
+}
+
+int findEvent(const ProcAnalysis& analysis, const GaitEvent& key) {
+  for (int index = 0; index < static_cast<int>(analysis.events.size()); ++index) {
+    const GaitEvent& event = analysis.events[static_cast<std::size_t>(index)];
+    if (event.frame == key.frame && event.side == key.side && event.type == key.type && std::abs(event.time - key.time) < 1e-12) return index;
+  }
+  return -1;
+}
+
+int rawCycleIndex(const ProcAnalysis& analysis, int cycle_index) {
+  if (cycle_index < 0 || cycle_index >= static_cast<int>(analysis.cycles.size())) return -1;
+  const GaitCycle& cycle = analysis.cycles[static_cast<std::size_t>(cycle_index)];
+  if (!cycle.mirrored) return cycle_index;
+  for (int index = 0; index < static_cast<int>(analysis.cycles.size()); ++index) {
+    const GaitCycle& other = analysis.cycles[static_cast<std::size_t>(index)];
+    if (!other.mirrored && other.side == cycle.side && std::abs(other.start_time - cycle.start_time) < 1e-8) return index;
+  }
+  return -1;
+}
+
+void syncMirrors(ProcAnalysis& analysis) {
+  analysis.cycles.erase(std::remove_if(analysis.cycles.begin(), analysis.cycles.end(),
+                                       [](const GaitCycle& cycle) { return cycle.mirrored; }),
+                        analysis.cycles.end());
+  mirrorCycles(analysis);
+}
+
+}  // namespace
+
+void rebuildDerivedAnalysis(ProcAnalysis& analysis, AnalysisDirtyFrom stage) {
+  if (stage == AnalysisDirtyFrom::Contacts) {
+    applyContactOverrides(analysis);
+    extractGaitEvents(analysis);
+    extractGaitCycles(analysis);
+    mirrorCycles(analysis);
+    fitRelationships(analysis);
+    analysis.derivation_note = kContactRebuildNote;
+    return;
+  }
+  if (stage == AnalysisDirtyFrom::Events) {
+    extractGaitCycles(analysis);
+    mirrorCycles(analysis);
+    fitRelationships(analysis);
+    analysis.derivation_note = kEventRebuildNote;
+    return;
+  }
+  syncMirrors(analysis);
+  fitRelationships(analysis);
+  analysis.derivation_note = kCycleRebuildNote;
+}
+
+int moveEvent(ProcAnalysis& analysis, int event_index, double time_s) {
+  if (event_index < 0 || event_index >= static_cast<int>(analysis.events.size()) || analysis.signals.empty()) return -1;
+  GaitEvent edited = analysis.events[static_cast<std::size_t>(event_index)];
+  const double start = analysis.signals.front().time;
+  const double end = analysis.signals.back().time;
+  edited.time = std::clamp(time_s, start, end);
+  edited.frame = nearestFrame(analysis, edited.time);
+  edited.time = analysis.signals[static_cast<std::size_t>(edited.frame)].time;
+  edited.manual_override = true;
+  analysis.events[static_cast<std::size_t>(event_index)] = edited;
+  sortEvents(analysis);
+  const int index = findEvent(analysis, edited);
+  rebuildDerivedAnalysis(analysis, AnalysisDirtyFrom::Events);
+  return index;
+}
+
+int setEventType(ProcAnalysis& analysis, int event_index, const std::string& type) {
+  if (event_index < 0 || event_index >= static_cast<int>(analysis.events.size())) return -1;
+  if (type != "initial_contact" && type != "toe_off") return event_index;
+  GaitEvent edited = analysis.events[static_cast<std::size_t>(event_index)];
+  edited.type = type;
+  edited.manual_override = true;
+  analysis.events[static_cast<std::size_t>(event_index)] = edited;
+  sortEvents(analysis);
+  const int index = findEvent(analysis, edited);
+  rebuildDerivedAnalysis(analysis, AnalysisDirtyFrom::Events);
+  return index;
 }
 
 void setCycleAccepted(ProcAnalysis& analysis, int cycle_index, bool accepted, const std::string& reason) {
-  if (cycle_index < 0 || cycle_index >= static_cast<int>(analysis.cycles.size())) return;
-  GaitCycle& cycle = analysis.cycles[static_cast<std::size_t>(cycle_index)];
+  const int raw = rawCycleIndex(analysis, cycle_index);
+  if (raw < 0) return;
+  GaitCycle& cycle = analysis.cycles[static_cast<std::size_t>(raw)];
   cycle.accepted = accepted;
   cycle.rejection_reason = accepted ? "" : (reason.empty() ? "manual" : reason);
   cycle.manual_override = true;
-  if (accepted && cycle.curves.hip_flex_deg.empty()) {
-    // Curves are filled by the caller through a fresh analyze. Keep the decision either way.
-  }
-  fitRelationships(analysis);
+  cycle.classification = accepted ? "straight" : "rejected";
+  if (accepted && cycle.curves.hip_flex_deg.empty() && cycle.end_frame > cycle.start_frame) normalizeCycle(analysis, cycle);
+  rebuildDerivedAnalysis(analysis, AnalysisDirtyFrom::Cycles);
 }
 
 void overrideContactRange(ProcAnalysis& analysis, const std::string& marker, int frame0, int frame1, bool contact) {
   if (frame1 < frame0) std::swap(frame0, frame1);
-  for (ContactTrack& track : analysis.contacts) {
-    if (track.marker != marker) continue;
-    frame0 = std::clamp(frame0, 0, static_cast<int>(track.contact.size()) - 1);
-    frame1 = std::clamp(frame1, 0, static_cast<int>(track.contact.size()) - 1);
-    for (int frame = frame0; frame <= frame1; ++frame) track.contact[static_cast<std::size_t>(frame)] = contact ? 1 : 0;
-    track.manual_override = true;
-    ContactOverride override_range;
-    override_range.marker = marker;
-    override_range.frame0 = frame0;
-    override_range.frame1 = frame1;
-    override_range.contact = contact;
-    analysis.contact_overrides.push_back(override_range);
+  for (const ContactTrack& track : analysis.contacts) {
+    if (track.marker != marker || track.automatic_contact.empty()) continue;
+    const int last = static_cast<int>(track.automatic_contact.size()) - 1;
+    ContactOverride range;
+    range.marker = marker;
+    range.frame0 = std::clamp(frame0, 0, last);
+    range.frame1 = std::clamp(frame1, 0, last);
+    range.contact = contact;
+    analysis.contact_overrides.push_back(range);
+    rebuildDerivedAnalysis(analysis, AnalysisDirtyFrom::Contacts);
     return;
   }
 }

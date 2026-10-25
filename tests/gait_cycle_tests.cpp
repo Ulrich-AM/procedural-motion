@@ -30,6 +30,7 @@ int runGaitCycleTests() {
   proc::AnalysisInput input;
   input.source = &walk.source;
   input.motion = &walk.motion;
+  input.semantics = proc::test::syntheticSemantics();
   input.theme = "walk";
   const proc::ProcAnalysis walked = proc::analyzeClip(input);
   const proc::GaitCycle* cycle = firstAccepted(walked, "left");

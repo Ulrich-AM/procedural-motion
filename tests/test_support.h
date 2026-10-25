@@ -26,3 +26,4 @@ int runGaitEventTests();
 int runGaitCycleTests();
 int runRelationshipTests();
 int runDatasetIndexTests();
+int runArchitectureTests();

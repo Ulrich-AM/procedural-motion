@@ -58,11 +58,13 @@ int runRelationshipTests() {
   proc::AnalysisInput input;
   input.source = &walk.source;
   input.motion = &walk.motion;
+  input.semantics = proc::test::syntheticSemantics();
   proc::ProcAnalysis analysis = proc::analyzeClip(input);
   stats.expect(!analysis.events.empty(), "roundtrip source has events");
+  proc::overrideContactRange(analysis, "left_heel", 1, 2, false);
+  stats.expect(!analysis.events.empty(), "contact rebuild keeps events");
   const double automatic = analysis.events.front().automatic_time;
   proc::moveEvent(analysis, 0, analysis.events.front().time + 0.04);
-  proc::overrideContactRange(analysis, "left_heel", 1, 2, false);
   const std::string text = proc::writeAnalysisToString(analysis);
   proc::ProcAnalysis loaded;
   const proc::Status status = proc::readAnalysisFromString(text, loaded);

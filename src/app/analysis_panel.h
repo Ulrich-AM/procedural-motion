@@ -3,6 +3,7 @@
 #include "analysis/proc_analysis.h"
 #include "motion/motion_player.h"
 
+#include <array>
 #include <filesystem>
 #include <string>
 
@@ -18,7 +19,8 @@ struct AnalysisUi {
   int marker = 0;
 };
 
-void drawAnalysisSection(AnalysisUi& ui, const SourceClip* source, const ProcMotion* motion, MotionPlayer& player,
+void drawAnalysisSection(AnalysisUi& ui, const SourceClip* source, const ProcMotion* motion,
+                         const std::array<int, kJointCount>& mapping, MotionPlayer& player,
                          const std::filesystem::path& asset_root);
 void drawAnalysisOverlay(const AnalysisUi& ui, MotionPlayer& player, float x0, float y0, float x1, float y1);
 

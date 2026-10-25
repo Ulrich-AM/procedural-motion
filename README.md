@@ -314,7 +314,7 @@ Phase 3 observes gait. It does not generate a walk or a run.
 
 ## Roadmap
 
-Phase 4 is not started. The next step is an architectural audit of PROC BODY, PROC MOTION, SourceClip, the importers, the retargeter, MotionPlayer, PROC ANALYSIS, the dataset layer, and the GUI/CLI boundary. A procedural generator waits until that review.
+Phase 1–3 foundation is architecturally frozen. See `ARCHITECTURE.md`. Phase 4 is not started. A generator may use PROC BODY, a reference model taken from PROC ANALYSIS, and speed, direction, and phase. It does not include SourceClip, the BVH or FBX importers, Assimp, the dataset index, LAFAN filenames, the analysis panel, or the batch analyzer.
 
 ## Phase 3 — motion analysis and gait extraction
 
@@ -324,7 +324,7 @@ Phase 3 watches imported locomotion. It detects contacts, splits same-side strid
 
 ### What is measured where
 
-Source geometry is measured on the `SourceClip`: foot and toe position, the virtual heel, root travel, ground height, contacts, and source leg length. Those numbers stay the same if the loaded PROC body changes from Neutral to an ANSUR preset.
+Source geometry is measured on the `SourceClip`: foot and toe position, the virtual heel, root travel, ground height, contacts, and source leg length. Those numbers stay the same if the loaded PROC body changes from Neutral to an ANSUR preset. Which source joint is the left foot comes from the retarget mapping (`SourceSemanticMap`), the same array the retargeter uses. Analysis does not keep a second name table. An unmapped toe copies the ankle.
 
 Joint rotation is measured on the retargeted PROC pose: pelvis, spine, hips, knees, ankles, shoulders, and elbows. Rotations are stored as a normalized quaternion plus a hemisphere-continuous log vector. If `dot(previous, current)` is negative, `current` is negated before the log. Scalar plots use the local X component of that log as sagittal flexion. Pelvis roll is the local Y component. Raw quaternion components are not averaged.
 
@@ -350,7 +350,7 @@ Relationships are per regime (`walk`, `run`, `sprint`), from accepted straight c
 
 Quality is stored as contact, timing, heading, continuity, and overall.
 
-Manual edits set `manual_override` and keep the automatic time, type, acceptance, or contact state beside the edited value.
+Manual edits set `manual_override` and keep the automatic time, type, acceptance, or contact state beside the edited value. A contact edit reapplies the override list from the automatic contacts and rebuilds events, cycles, and relationships. Downstream event and cycle overrides are cleared, and `derivation_note` says so. An event edit rebuilds cycles and relationships. Accepting or rejecting a cycle refits relationships and drops a mirror that would otherwise stay accepted. `PROC_ANALYSIS` remains version 1.
 
 ### Dataset index and batch tool
 

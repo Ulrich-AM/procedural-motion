@@ -394,7 +394,7 @@ void drawSidePanel(LabState& lab) {
     lab.analysis_ui.valid = false;
   }
   drawAnalysisSection(lab.analysis_ui, lab.import.has_source ? &lab.import.clip : nullptr, lab.has_motion ? &lab.motion : nullptr,
-                      lab.player, lab.asset_root);
+                      lab.import.mapping, lab.player, lab.asset_root);
 }
 
 void drawTransport(LabState& lab) {

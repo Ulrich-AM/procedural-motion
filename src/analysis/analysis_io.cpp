@@ -398,6 +398,7 @@ std::string writeAnalysisToString(const ProcAnalysis& analysis) {
       {"leg_length_definition", analysis.leg_length_definition},
       {"heel", {{"provenance", analysis.heel_provenance}}},
       {"warnings", analysis.warnings},
+      {"derivation_note", analysis.derivation_note},
       {"signals", signalsJson(analysis.signals)},
       {"contacts", contacts},
       {"contact_overrides", overrides},
@@ -439,6 +440,7 @@ Status readAnalysisFromString(std::string_view text, ProcAnalysis& out, std::str
   analysis.source_leg_length_m = document.value("source_leg_length_m", 0.0);
   analysis.leg_length_definition = document.value("leg_length_definition", "");
   analysis.heel_provenance = document.value("heel", nlohmann::json::object()).value("provenance", "inferred_virtual");
+  analysis.derivation_note = document.value("derivation_note", "");
   if (document.contains("warnings")) {
     for (const nlohmann::json& warning : document["warnings"]) analysis.warnings.push_back(warning.get<std::string>());
   }

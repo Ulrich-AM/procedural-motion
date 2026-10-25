@@ -4,8 +4,10 @@
 #include "import/source_motion.h"
 #include "math/quat.h"
 #include "motion/proc_motion.h"
+#include "retarget/source_semantics.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -180,15 +182,15 @@ inline SyntheticGait makeSyntheticGait(SyntheticKind kind) {
     };
     const double left_flex = flex(0.0);
     const double right_flex = flex(right_phase);
-    pose.local_rotation[6] = quatAxisAngle(glm::dvec3(1.0, 0.0, 0.0), left_flex * 0.35);
-    pose.local_rotation[7] = quatAxisAngle(glm::dvec3(1.0, 0.0, 0.0), left_flex * 0.90);
-    pose.local_rotation[8] = quatAxisAngle(glm::dvec3(1.0, 0.0, 0.0), -left_flex * 0.25);
-    pose.local_rotation[10] = quatAxisAngle(glm::dvec3(1.0, 0.0, 0.0), right_flex * 0.35);
-    pose.local_rotation[11] = quatAxisAngle(glm::dvec3(1.0, 0.0, 0.0), right_flex * 0.90);
-    pose.local_rotation[12] = quatAxisAngle(glm::dvec3(1.0, 0.0, 0.0), -right_flex * 0.25);
+    pose.local_rotation[jointIndex(JointId::LeftHip)] = quatAxisAngle(glm::dvec3(1.0, 0.0, 0.0), left_flex * 0.35);
+    pose.local_rotation[jointIndex(JointId::LeftKnee)] = quatAxisAngle(glm::dvec3(1.0, 0.0, 0.0), left_flex * 0.90);
+    pose.local_rotation[jointIndex(JointId::LeftFoot)] = quatAxisAngle(glm::dvec3(1.0, 0.0, 0.0), -left_flex * 0.25);
+    pose.local_rotation[jointIndex(JointId::RightHip)] = quatAxisAngle(glm::dvec3(1.0, 0.0, 0.0), right_flex * 0.35);
+    pose.local_rotation[jointIndex(JointId::RightKnee)] = quatAxisAngle(glm::dvec3(1.0, 0.0, 0.0), right_flex * 0.90);
+    pose.local_rotation[jointIndex(JointId::RightFoot)] = quatAxisAngle(glm::dvec3(1.0, 0.0, 0.0), -right_flex * 0.25);
     const double arm = std::sin(2.0 * 3.14159265358979323846 * time_s / period);
-    pose.local_rotation[14] = quatAxisAngle(glm::dvec3(1.0, 0.0, 0.0), arm * 0.40);
-    pose.local_rotation[18] = quatAxisAngle(glm::dvec3(1.0, 0.0, 0.0), -arm * 0.40);
+    pose.local_rotation[jointIndex(JointId::LeftShoulder)] = quatAxisAngle(glm::dvec3(1.0, 0.0, 0.0), arm * 0.40);
+    pose.local_rotation[jointIndex(JointId::RightShoulder)] = quatAxisAngle(glm::dvec3(1.0, 0.0, 0.0), -arm * 0.40);
     gait.motion.frames.push_back(pose);
   }
   gait.motion.skeleton = kSkeletonId;
@@ -205,6 +207,23 @@ inline SyntheticGait makeSyntheticGait(SyntheticKind kind) {
   }
   return gait;
 }
+
+inline std::array<int, kJointCount> syntheticMapping() {
+  std::array<int, kJointCount> mapping{};
+  mapping.fill(-1);
+  mapping[jointIndex(JointId::LegRoot)] = 0;
+  mapping[jointIndex(JointId::LeftHip)] = 1;
+  mapping[jointIndex(JointId::LeftKnee)] = 2;
+  mapping[jointIndex(JointId::LeftFoot)] = 3;
+  mapping[jointIndex(JointId::LeftToe)] = 4;
+  mapping[jointIndex(JointId::RightHip)] = 5;
+  mapping[jointIndex(JointId::RightKnee)] = 6;
+  mapping[jointIndex(JointId::RightFoot)] = 7;
+  mapping[jointIndex(JointId::RightToe)] = 8;
+  return mapping;
+}
+
+inline SourceSemanticMap syntheticSemantics() { return semanticsFromMapping(syntheticMapping()); }
 
 }  // namespace test
 }  // namespace proc

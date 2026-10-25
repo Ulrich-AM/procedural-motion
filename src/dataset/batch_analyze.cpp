@@ -8,6 +8,7 @@
 #include "import/fbx_importer.h"
 #include "retarget/retarget_profile.h"
 #include "retarget/retargeter.h"
+#include "retarget/source_semantics.h"
 
 #include <algorithm>
 #include <fstream>
@@ -81,10 +82,14 @@ BatchReport analyzeBatch(const BatchRequest& request) {
         continue;
       }
       ProcMotion motion;
-      if (has_body && selected != nullptr) {
+      std::array<int, kJointCount> mapping{};
+      mapping.fill(-1);
+      if (selected != nullptr) {
         std::vector<std::string> names;
         for (const SourceJoint& joint : source.joints) names.push_back(joint.name);
-        const std::array<int, kJointCount> mapping = mappingFromProfile(*selected, names);
+        mapping = mappingFromProfile(*selected, names);
+      }
+      if (has_body && selected != nullptr) {
         RetargetReport retarget_report;
         status = retargetClip(body, source, mapping, selected->required, {}, motion, retarget_report);
         if (!status.ok()) {
@@ -97,6 +102,7 @@ BatchReport analyzeBatch(const BatchRequest& request) {
       AnalysisInput input;
       input.source = &source;
       input.motion = motion.frames.empty() ? nullptr : &motion;
+      input.semantics = semanticsFromMapping(mapping);
       input.dataset = clip.dataset;
       input.theme = clip.theme;
       input.subject = clip.subject;

@@ -55,6 +55,7 @@ int runAnalysisSignalTests() {
   proc::AnalysisInput input;
   input.source = &walk.source;
   input.motion = &walk.motion;
+  input.semantics = proc::test::syntheticSemantics();
   const proc::ProcAnalysis analysis = proc::analyzeClip(input);
   stats.expect(absDiff(analysis.source_leg_length_m, walk.leg_length) < 1e-6, "source leg length is hip-knee plus knee-ankle");
   stats.expect(analysis.heel_provenance == "inferred_virtual", "heel provenance is virtual");

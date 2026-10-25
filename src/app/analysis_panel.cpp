@@ -2,6 +2,7 @@
 
 #include "analysis/analysis_io.h"
 #include "analysis/signal_processing.h"
+#include "retarget/source_semantics.h"
 
 #include <imgui.h>
 
@@ -76,7 +77,8 @@ const ContactTrack* findTrack(const ProcAnalysis& analysis, const std::string& n
 
 }  // namespace
 
-void drawAnalysisSection(AnalysisUi& ui, const SourceClip* source, const ProcMotion* motion, MotionPlayer& player,
+void drawAnalysisSection(AnalysisUi& ui, const SourceClip* source, const ProcMotion* motion,
+                         const std::array<int, kJointCount>& mapping, MotionPlayer& player,
                          const std::filesystem::path& asset_root) {
   ImGui::Spacing();
   ImGui::TextUnformatted("ANALYSIS");
@@ -88,6 +90,7 @@ void drawAnalysisSection(AnalysisUi& ui, const SourceClip* source, const ProcMot
       AnalysisInput input;
       input.source = source;
       input.motion = motion;
+      input.semantics = semanticsFromMapping(mapping);
       input.motion_path = source->path;
       input.dataset = "";
       input.theme = "";
@@ -147,27 +150,35 @@ void drawAnalysisSection(AnalysisUi& ui, const SourceClip* source, const ProcMot
     }
   }
   ImGui::EndChild();
+  if (ui.event_index >= static_cast<int>(ui.analysis.events.size())) ui.event_index = ui.analysis.events.empty() ? -1 : 0;
   if (ui.event_index >= 0 && ui.event_index < static_cast<int>(ui.analysis.events.size())) {
-    GaitEvent& event = ui.analysis.events[static_cast<std::size_t>(ui.event_index)];
+    const int frame_now = ui.analysis.events[static_cast<std::size_t>(ui.event_index)].frame;
+    const std::string type_now = ui.analysis.events[static_cast<std::size_t>(ui.event_index)].type;
     if (ImGui::Button("Event -1")) {
-      const int next = std::max(0, event.frame - 1);
-      moveEvent(ui.analysis, ui.event_index, ui.analysis.signals[static_cast<std::size_t>(next)].time);
-      player.seekSeconds(ui.analysis.events[static_cast<std::size_t>(ui.event_index)].time);
+      const int next = std::max(0, frame_now - 1);
+      ui.event_index = moveEvent(ui.analysis, ui.event_index, ui.analysis.signals[static_cast<std::size_t>(next)].time);
+      if (ui.event_index >= 0) player.seekSeconds(ui.analysis.events[static_cast<std::size_t>(ui.event_index)].time);
     }
     ImGui::SameLine();
     if (ImGui::Button("Event +1")) {
-      const int next = std::min(static_cast<int>(ui.analysis.signals.size()) - 1, event.frame + 1);
-      moveEvent(ui.analysis, ui.event_index, ui.analysis.signals.empty() ? event.time : ui.analysis.signals[static_cast<std::size_t>(next)].time);
-      player.seekSeconds(ui.analysis.events[static_cast<std::size_t>(ui.event_index)].time);
+      const int next = std::min(static_cast<int>(ui.analysis.signals.size()) - 1, frame_now + 1);
+      const double time_s = ui.analysis.signals.empty() ? ui.analysis.events[static_cast<std::size_t>(ui.event_index)].time
+                                                        : ui.analysis.signals[static_cast<std::size_t>(next)].time;
+      ui.event_index = moveEvent(ui.analysis, ui.event_index, time_s);
+      if (ui.event_index >= 0) player.seekSeconds(ui.analysis.events[static_cast<std::size_t>(ui.event_index)].time);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Toggle type")) setEventType(ui.analysis, ui.event_index, event.type == "initial_contact" ? "toe_off" : "initial_contact");
-    float event_time = static_cast<float>(event.time);
-    const float start = ui.analysis.signals.empty() ? 0.0f : static_cast<float>(ui.analysis.signals.front().time);
-    const float end = ui.analysis.signals.empty() ? 1.0f : static_cast<float>(ui.analysis.signals.back().time);
-    if (ImGui::SliderFloat("event time", &event_time, start, std::max(start + 0.001f, end))) {
-      moveEvent(ui.analysis, ui.event_index, event_time);
-      player.seekSeconds(ui.analysis.events[static_cast<std::size_t>(ui.event_index)].time);
+    if (ImGui::Button("Toggle type")) {
+      ui.event_index = setEventType(ui.analysis, ui.event_index, type_now == "initial_contact" ? "toe_off" : "initial_contact");
+    }
+    if (ui.event_index >= 0 && ui.event_index < static_cast<int>(ui.analysis.events.size())) {
+      float event_time = static_cast<float>(ui.analysis.events[static_cast<std::size_t>(ui.event_index)].time);
+      const float start = ui.analysis.signals.empty() ? 0.0f : static_cast<float>(ui.analysis.signals.front().time);
+      const float end = ui.analysis.signals.empty() ? 1.0f : static_cast<float>(ui.analysis.signals.back().time);
+      if (ImGui::SliderFloat("event time", &event_time, start, std::max(start + 0.001f, end))) {
+        ui.event_index = moveEvent(ui.analysis, ui.event_index, event_time);
+        if (ui.event_index >= 0) player.seekSeconds(ui.analysis.events[static_cast<std::size_t>(ui.event_index)].time);
+      }
     }
   }
 
@@ -200,7 +211,8 @@ void drawAnalysisSection(AnalysisUi& ui, const SourceClip* source, const ProcMot
   if (ImGui::Button("Force contact")) overrideContactRange(ui.analysis, kMarkers[ui.marker], frame, frame, true);
   ImGui::SameLine();
   if (ImGui::Button("Clear contact")) overrideContactRange(ui.analysis, kMarkers[ui.marker], frame, frame, false);
-  ImGui::TextWrapped("Manual contact edits keep the automatic state. Events stay as detected until you analyze again.");
+  ImGui::TextWrapped("A contact edit rebuilds events and cycles and clears downstream manual edits. An event edit rebuilds cycles. Automatic values stay beside the edit.");
+  if (!ui.analysis.derivation_note.empty()) ImGui::TextWrapped("%s", ui.analysis.derivation_note.c_str());
 
   ImGui::Combo("plot", &ui.plot, kPlots, 8);
   const std::vector<double> plotted = seriesFor(ui.analysis, ui.plot);

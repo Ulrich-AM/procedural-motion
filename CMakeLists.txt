@@ -148,7 +148,8 @@ add_executable(proc_motion_tests
   tests/gait_event_tests.cpp
   tests/gait_cycle_tests.cpp
   tests/relationship_tests.cpp
-  tests/dataset_index_tests.cpp)
+  tests/dataset_index_tests.cpp
+  tests/architecture_tests.cpp)
 target_link_libraries(proc_motion_tests PRIVATE proc_core)
 target_compile_definitions(proc_motion_tests PRIVATE PROCMOTION_SOURCE_DIR="${PROCMOTION_SOURCE_DIR_FWD}")
 if(MSVC)

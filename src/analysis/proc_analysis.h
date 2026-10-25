@@ -3,6 +3,7 @@
 #include "analysis/signal_processing.h"
 #include "import/source_motion.h"
 #include "motion/proc_motion.h"
+#include "retarget/source_semantics.h"
 
 #include <array>
 #include <cstdint>
@@ -281,11 +282,15 @@ struct ProcAnalysis {
   std::vector<GaitCycle> cycles;
   std::vector<RelationshipFit> relationships;
   std::vector<std::string> warnings;
+  // Latest derived-state note. Replaced, not appended, so a second rebuild stays identical.
+  std::string derivation_note;
 };
 
 struct AnalysisInput {
   const SourceClip* source = nullptr;
   const ProcMotion* motion = nullptr;
+  // Resolved from the retarget mapping. The analyzer does not guess source names.
+  SourceSemanticMap semantics;
   std::string dataset;
   std::string theme;
   std::string subject;
@@ -293,10 +298,19 @@ struct AnalysisInput {
   std::string motion_path;
 };
 
+enum class AnalysisDirtyFrom { Contacts, Events, Cycles };
+
 ProcAnalysis analyzeClip(const AnalysisInput& input, const AnalysisSettings& settings = {});
 
-void moveEvent(ProcAnalysis& analysis, int event_index, double time_s);
-void setEventType(ProcAnalysis& analysis, int event_index, const std::string& type);
+// Contacts rebuild events, cycles, mirrors, and relationships.
+// Events rebuild cycles, mirrors, and relationships and keep the edited events.
+// Cycles resync mirrors and refit relationships.
+// The same analysis and the same overrides rebuild to the same result.
+void rebuildDerivedAnalysis(ProcAnalysis& analysis, AnalysisDirtyFrom stage);
+
+// Returns the event index after time-sorting, or -1 when the edit is ignored.
+int moveEvent(ProcAnalysis& analysis, int event_index, double time_s);
+int setEventType(ProcAnalysis& analysis, int event_index, const std::string& type);
 void setCycleAccepted(ProcAnalysis& analysis, int cycle_index, bool accepted, const std::string& reason);
 void overrideContactRange(ProcAnalysis& analysis, const std::string& marker, int frame0, int frame1, bool contact);
 

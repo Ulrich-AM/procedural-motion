@@ -11,6 +11,35 @@ inline constexpr int kJointCount = 22;
 inline constexpr int kBoneCount = 21;
 inline constexpr int kRootJoint = 0;
 
+// Frozen proc_humanoid_v0 order. Values match kJointNames. Do not reorder.
+enum class JointId : int {
+  LegRoot = 0,
+  Spine1,
+  Spine2,
+  ArmRoot,
+  Neck,
+  Head,
+  LeftHip,
+  LeftKnee,
+  LeftFoot,
+  LeftToe,
+  RightHip,
+  RightKnee,
+  RightFoot,
+  RightToe,
+  LeftShoulder,
+  LeftElbow,
+  LeftHand,
+  LeftFinger,
+  RightShoulder,
+  RightElbow,
+  RightHand,
+  RightFinger,
+  Count
+};
+
+inline constexpr int jointIndex(JointId joint) { return static_cast<int>(joint); }
+
 inline constexpr std::array<const char*, kJointCount> kJointNames = {
     "legrootj", "spine1j", "spine2j", "armrootj", "neckj", "headj",
     "lleguppj", "lleglowj", "lfootj",  "ltoesj",   "rleguppj", "rleglowj",

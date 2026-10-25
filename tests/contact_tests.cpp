@@ -27,6 +27,7 @@ int runContactTests() {
   proc::AnalysisInput input;
   input.source = &walk.source;
   input.motion = &walk.motion;
+  input.semantics = proc::test::syntheticSemantics();
   const proc::ProcAnalysis walked = proc::analyzeClip(input);
   const proc::GaitCycle* walk_cycle = firstAccepted(walked, "left");
   stats.expect(walk_cycle != nullptr, "walk produces an accepted cycle");

@@ -128,7 +128,8 @@ int main(int argc, char** argv) {
   const int gait_cycle = runGaitCycleTests();
   const int relationship = runRelationshipTests();
   const int dataset_index = runDatasetIndexTests();
-  const int failed = body + fk + motion + bvh + retarget + import + analysis_signal + contact + gait_event + gait_cycle + relationship + dataset_index;
+  const int architecture = runArchitectureTests();
+  const int failed = body + fk + motion + bvh + retarget + import + analysis_signal + contact + gait_event + gait_cycle + relationship + dataset_index + architecture;
   if (failed != 0) {
     std::cerr << failed << " test(s) failed\n";
     return 1;
