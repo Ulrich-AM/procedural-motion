@@ -1,5 +1,6 @@
 # Build output
 build/
+build_log.txt
 out/
 bin/
 
@@ -9,6 +10,7 @@ bin/
 .idea/
 *.user
 *.suo
+imgui.ini
 
 # CMake
 CMakeCache.txt

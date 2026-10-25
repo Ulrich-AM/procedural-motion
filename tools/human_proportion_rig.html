@@ -1,0 +1,1298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PROC BODY — human proportion rig</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #1a1a1a; color: #e8e8e8; font-family: Arial, Helvetica, sans-serif; }
+  #app { display: grid; grid-template-columns: 380px 1fr; grid-template-rows: 40px 1fr 34px; height: 100%; }
+  header { grid-column: 1 / -1; background: #111; border-bottom: 1px solid #444; padding: 8px 12px; letter-spacing: 0.08em; }
+  #side { overflow: auto; background: #242424; border-right: 1px solid #444; padding: 10px 12px 24px; }
+  #stage { position: relative; background: #101010; min-height: 0; }
+  canvas { width: 100%; height: 100%; display: block; cursor: grab; }
+  #status { grid-column: 1 / -1; background: #111; border-top: 1px solid #444; padding: 8px 12px; font-size: 13px; }
+  h2 { margin: 14px 0 6px; font-size: 12px; letter-spacing: 0.12em; font-weight: normal; color: #c8c8c8; border-bottom: 1px solid #444; }
+  p.note { color: #aaa; font-size: 12px; line-height: 1.35; }
+  button, input, select { background: #2a2a2a; color: #eee; border: 1px solid #666; border-radius: 0; font-family: Arial, Helvetica, sans-serif; font-size: 13px; }
+  button { padding: 4px 8px; margin: 0 4px 4px 0; }
+  button:hover { background: #3a3a3a; }
+  button:disabled { color: #777; border-color: #444; }
+  label.row { display: grid; grid-template-columns: 118px 1fr 64px; gap: 6px; align-items: center; margin: 3px 0; font-size: 12px; }
+  input[type="number"] { width: 100%; box-sizing: border-box; background: #111; padding: 2px 4px; }
+  input[type="range"] { width: 100%; }
+  .bone { border-top: 1px solid #333; padding-top: 6px; margin-top: 6px; }
+  .bone b { font-weight: normal; letter-spacing: 0.04em; }
+  .readout { color: #aaa; font-size: 11px; margin: 2px 0 6px; }
+  #errors { white-space: pre-wrap; background: #1b1b1b; border-left: 3px solid #ddd; padding: 6px 8px; font-size: 12px; }
+  #errors.ok { border-left-color: #777; color: #ccc; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>PROC BODY &nbsp; human proportion rig</header>
+  <div id="side"></div>
+  <div id="stage"><canvas id="view"></canvas></div>
+  <div id="status">validation</div>
+</div>
+<script>
+const NEUTRAL = {
+  "format": "PROC_BODY",
+  "version": 1,
+  "skeleton": "proc_humanoid_v0",
+  "name": "neutral",
+  "anthropometry": {
+    "description": "External reference measurements only. They are not joint-center distances and they do not drive bone lengths.",
+    "stature_m": 1.75,
+    "shoulder_breadth_m": 0.41,
+    "hip_breadth_m": 0.34,
+    "chest_breadth_m": 0.31,
+    "hand_length_m": 0.19,
+    "foot_length_m": 0.265,
+    "head_height_m": 0.23,
+    "arm_span_m": 1.78
+  },
+  "joints": [
+    {
+      "name": "legrootj",
+      "rest_position_m": [
+        0.0,
+        0.0,
+        0.992
+      ]
+    },
+    {
+      "name": "spine1j",
+      "rest_position_m": [
+        0.0,
+        -0.024,
+        1.1139999999999999
+      ]
+    },
+    {
+      "name": "spine2j",
+      "rest_position_m": [
+        0.0,
+        0.018000000000000002,
+        1.2519999999999998
+      ]
+    },
+    {
+      "name": "armrootj",
+      "rest_position_m": [
+        0.0,
+        -0.03,
+        1.4059999999999997
+      ]
+    },
+    {
+      "name": "neckj",
+      "rest_position_m": [
+        0.008,
+        0.013999999999999999,
+        1.5119999999999998
+      ]
+    },
+    {
+      "name": "headj",
+      "rest_position_m": [
+        -0.009999999999999998,
+        0.034,
+        1.7299999999999998
+      ]
+    },
+    {
+      "name": "lleguppj",
+      "rest_position_m": [
+        -0.096,
+        -0.018,
+        0.9279999999999999
+      ]
+    },
+    {
+      "name": "lleglowj",
+      "rest_position_m": [
+        -0.07200000000000001,
+        0.014000000000000002,
+        0.49999999999999994
+      ]
+    },
+    {
+      "name": "lfootj",
+      "rest_position_m": [
+        -0.08800000000000001,
+        -0.005999999999999998,
+        0.08199999999999996
+      ]
+    },
+    {
+      "name": "ltoesj",
+      "rest_position_m": [
+        -0.08600000000000001,
+        0.196,
+        -4.163336342344337e-17
+      ]
+    },
+    {
+      "name": "rleguppj",
+      "rest_position_m": [
+        0.096,
+        -0.018,
+        0.9279999999999999
+      ]
+    },
+    {
+      "name": "rleglowj",
+      "rest_position_m": [
+        0.07200000000000001,
+        0.014000000000000002,
+        0.49999999999999994
+      ]
+    },
+    {
+      "name": "rfootj",
+      "rest_position_m": [
+        0.08800000000000001,
+        -0.005999999999999998,
+        0.08199999999999996
+      ]
+    },
+    {
+      "name": "rtoesj",
+      "rest_position_m": [
+        0.08600000000000001,
+        0.196,
+        -4.163336342344337e-17
+      ]
+    },
+    {
+      "name": "larmuppj",
+      "rest_position_m": [
+        -0.188,
+        -0.009999999999999998,
+        1.3839999999999997
+      ]
+    },
+    {
+      "name": "larmlowj",
+      "rest_position_m": [
+        -0.496,
+        0.006000000000000002,
+        1.3559999999999997
+      ]
+    },
+    {
+      "name": "lhandj",
+      "rest_position_m": [
+        -0.748,
+        0.020000000000000004,
+        1.3459999999999996
+      ]
+    },
+    {
+      "name": "lfingj",
+      "rest_position_m": [
+        -0.852,
+        0.04000000000000001,
+        1.3399999999999996
+      ]
+    },
+    {
+      "name": "rarmuppj",
+      "rest_position_m": [
+        0.188,
+        -0.009999999999999998,
+        1.3839999999999997
+      ]
+    },
+    {
+      "name": "rarmlowj",
+      "rest_position_m": [
+        0.496,
+        0.006000000000000002,
+        1.3559999999999997
+      ]
+    },
+    {
+      "name": "rhandj",
+      "rest_position_m": [
+        0.748,
+        0.020000000000000004,
+        1.3459999999999996
+      ]
+    },
+    {
+      "name": "rfingj",
+      "rest_position_m": [
+        0.852,
+        0.04000000000000001,
+        1.3399999999999996
+      ]
+    }
+  ],
+  "bones": [
+    {
+      "name": "spine1b",
+      "parent_joint": "legrootj",
+      "child_joint": "spine1j",
+      "length_m": 0.12433824833895642,
+      "rest_direction": [
+        0.0,
+        -0.1930218602933347,
+        0.981194456491118
+      ],
+      "rest_vector_m": [
+        0.0,
+        -0.024,
+        0.122
+      ],
+      "locked": true
+    },
+    {
+      "name": "spine2b",
+      "parent_joint": "spine1j",
+      "child_joint": "spine2j",
+      "length_m": 0.1442497833620557,
+      "rest_direction": [
+        0.0,
+        0.291161615782696,
+        0.9566738804288584
+      ],
+      "rest_vector_m": [
+        0.0,
+        0.042,
+        0.138
+      ],
+      "locked": true
+    },
+    {
+      "name": "spine3b",
+      "parent_joint": "spine2j",
+      "child_joint": "armrootj",
+      "length_m": 0.1613071604114337,
+      "rest_direction": [
+        0.0,
+        -0.29756893542462787,
+        0.9547003344873477
+      ],
+      "rest_vector_m": [
+        0.0,
+        -0.048,
+        0.154
+      ],
+      "locked": true
+    },
+    {
+      "name": "neckb",
+      "parent_joint": "armrootj",
+      "child_joint": "neckj",
+      "length_m": 0.11504781614615725,
+      "rest_direction": [
+        0.06953630471209263,
+        0.3824496759165094,
+        0.9213560374352272
+      ],
+      "rest_vector_m": [
+        0.008,
+        0.044,
+        0.106
+      ],
+      "locked": true
+    },
+    {
+      "name": "headb",
+      "parent_joint": "neckj",
+      "child_joint": "headj",
+      "length_m": 0.21965427380317462,
+      "rest_direction": [
+        -0.08194696004926924,
+        0.0910521778325214,
+        0.9924687383744831
+      ],
+      "rest_vector_m": [
+        -0.018,
+        0.02,
+        0.218
+      ],
+      "locked": true
+    },
+    {
+      "name": "llegrootb",
+      "parent_joint": "legrootj",
+      "child_joint": "lleguppj",
+      "length_m": 0.11677328461596,
+      "rest_direction": [
+        -0.8221058465189323,
+        -0.1541448462222998,
+        -0.5480705643459548
+      ],
+      "rest_vector_m": [
+        -0.096,
+        -0.018,
+        -0.064
+      ],
+      "locked": true
+    },
+    {
+      "name": "lleguppb",
+      "parent_joint": "lleguppj",
+      "child_joint": "lleglowj",
+      "length_m": 0.4298650951170611,
+      "rest_direction": [
+        0.05583146962296231,
+        0.07444195949728308,
+        -0.9956612082761611
+      ],
+      "rest_vector_m": [
+        0.024,
+        0.032,
+        -0.428
+      ],
+      "locked": true
+    },
+    {
+      "name": "lleglowb",
+      "parent_joint": "lleglowj",
+      "child_joint": "lfootj",
+      "length_m": 0.41878395384732686,
+      "rest_direction": [
+        -0.038205857347230185,
+        -0.047757321684037735,
+        -0.9981280231963886
+      ],
+      "rest_vector_m": [
+        -0.016,
+        -0.02,
+        -0.418
+      ],
+      "locked": true
+    },
+    {
+      "name": "lfootb",
+      "parent_joint": "lfootj",
+      "child_joint": "ltoesj",
+      "length_m": 0.21801834785173474,
+      "rest_direction": [
+        0.009173539840601477,
+        0.9265275239007492,
+        -0.3761151334646606
+      ],
+      "rest_vector_m": [
+        0.002,
+        0.202,
+        -0.082
+      ],
+      "locked": true
+    },
+    {
+      "name": "rlegrootb",
+      "parent_joint": "legrootj",
+      "child_joint": "rleguppj",
+      "length_m": 0.11677328461596,
+      "rest_direction": [
+        0.8221058465189323,
+        -0.1541448462222998,
+        -0.5480705643459548
+      ],
+      "rest_vector_m": [
+        0.096,
+        -0.018,
+        -0.064
+      ],
+      "locked": true
+    },
+    {
+      "name": "rleguppb",
+      "parent_joint": "rleguppj",
+      "child_joint": "rleglowj",
+      "length_m": 0.4298650951170611,
+      "rest_direction": [
+        -0.05583146962296231,
+        0.07444195949728308,
+        -0.9956612082761611
+      ],
+      "rest_vector_m": [
+        -0.024,
+        0.032,
+        -0.428
+      ],
+      "locked": true
+    },
+    {
+      "name": "rleglowb",
+      "parent_joint": "rleglowj",
+      "child_joint": "rfootj",
+      "length_m": 0.41878395384732686,
+      "rest_direction": [
+        0.038205857347230185,
+        -0.047757321684037735,
+        -0.9981280231963886
+      ],
+      "rest_vector_m": [
+        0.016,
+        -0.02,
+        -0.418
+      ],
+      "locked": true
+    },
+    {
+      "name": "rfootb",
+      "parent_joint": "rfootj",
+      "child_joint": "rtoesj",
+      "length_m": 0.21801834785173474,
+      "rest_direction": [
+        -0.009173539840601477,
+        0.9265275239007492,
+        -0.3761151334646606
+      ],
+      "rest_vector_m": [
+        -0.002,
+        0.202,
+        -0.082
+      ],
+      "locked": true
+    },
+    {
+      "name": "larmrootb",
+      "parent_joint": "armrootj",
+      "child_joint": "larmuppj",
+      "length_m": 0.19033654404764208,
+      "rest_direction": [
+        -0.9877241437826189,
+        0.10507703657261903,
+        -0.11558474022988093
+      ],
+      "rest_vector_m": [
+        -0.188,
+        0.02,
+        -0.022
+      ],
+      "locked": true
+    },
+    {
+      "name": "larmuppb",
+      "parent_joint": "larmuppj",
+      "child_joint": "larmlowj",
+      "length_m": 0.3096837096135346,
+      "rest_direction": [
+        -0.9945631314748982,
+        0.051665617219475234,
+        -0.09041483013408166
+      ],
+      "rest_vector_m": [
+        -0.308,
+        0.016,
+        -0.028
+      ],
+      "locked": true
+    },
+    {
+      "name": "larmlowb",
+      "parent_joint": "larmlowj",
+      "child_joint": "lhandj",
+      "length_m": 0.2525866188063018,
+      "rest_direction": [
+        -0.9976775539057687,
+        0.055426530772542705,
+        -0.03959037912324479
+      ],
+      "rest_vector_m": [
+        -0.252,
+        0.014,
+        -0.01
+      ],
+      "locked": true
+    },
+    {
+      "name": "lhandb",
+      "parent_joint": "lhandj",
+      "child_joint": "lfingj",
+      "length_m": 0.10607544484940894,
+      "rest_direction": [
+        -0.9804342574065528,
+        0.18854504950126016,
+        -0.05656351485037805
+      ],
+      "rest_vector_m": [
+        -0.104,
+        0.02,
+        -0.006
+      ],
+      "locked": true
+    },
+    {
+      "name": "rarmrootb",
+      "parent_joint": "armrootj",
+      "child_joint": "rarmuppj",
+      "length_m": 0.19033654404764208,
+      "rest_direction": [
+        0.9877241437826189,
+        0.10507703657261903,
+        -0.11558474022988093
+      ],
+      "rest_vector_m": [
+        0.188,
+        0.02,
+        -0.022
+      ],
+      "locked": true
+    },
+    {
+      "name": "rarmuppb",
+      "parent_joint": "rarmuppj",
+      "child_joint": "rarmlowj",
+      "length_m": 0.3096837096135346,
+      "rest_direction": [
+        0.9945631314748982,
+        0.051665617219475234,
+        -0.09041483013408166
+      ],
+      "rest_vector_m": [
+        0.308,
+        0.016,
+        -0.028
+      ],
+      "locked": true
+    },
+    {
+      "name": "rarmlowb",
+      "parent_joint": "rarmlowj",
+      "child_joint": "rhandj",
+      "length_m": 0.2525866188063018,
+      "rest_direction": [
+        0.9976775539057687,
+        0.055426530772542705,
+        -0.03959037912324479
+      ],
+      "rest_vector_m": [
+        0.252,
+        0.014,
+        -0.01
+      ],
+      "locked": true
+    },
+    {
+      "name": "rhandb",
+      "parent_joint": "rhandj",
+      "child_joint": "rfingj",
+      "length_m": 0.10607544484940894,
+      "rest_direction": [
+        0.9804342574065528,
+        0.18854504950126016,
+        -0.05656351485037805
+      ],
+      "rest_vector_m": [
+        0.104,
+        0.02,
+        -0.006
+      ],
+      "locked": true
+    }
+  ],
+  "constraints": [
+    {
+      "joint": "legrootj",
+      "type": "root",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit."
+    },
+    {
+      "joint": "spine1j",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        0.0,
+        0.291161615782696,
+        0.9566738804288584
+      ],
+      "max_swing_deg": 40.0,
+      "max_twist_deg": 25.0
+    },
+    {
+      "joint": "spine2j",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        0.0,
+        -0.29756893542462787,
+        0.9547003344873477
+      ],
+      "max_swing_deg": 40.0,
+      "max_twist_deg": 25.0
+    },
+    {
+      "joint": "armrootj",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        0.06953630471209263,
+        0.3824496759165094,
+        0.9213560374352272
+      ],
+      "max_swing_deg": 40.0,
+      "max_twist_deg": 25.0
+    },
+    {
+      "joint": "neckj",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        -0.08194696004926924,
+        0.0910521778325214,
+        0.9924687383744831
+      ],
+      "max_swing_deg": 50.0,
+      "max_twist_deg": 40.0
+    },
+    {
+      "joint": "headj",
+      "type": "endpoint",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit."
+    },
+    {
+      "joint": "lleguppj",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        0.05583146962296231,
+        0.07444195949728308,
+        -0.9956612082761611
+      ],
+      "max_swing_deg": 90.0,
+      "max_twist_deg": 40.0
+    },
+    {
+      "joint": "rleguppj",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        -0.05583146962296231,
+        0.07444195949728308,
+        -0.9956612082761611
+      ],
+      "max_swing_deg": 90.0,
+      "max_twist_deg": 40.0
+    },
+    {
+      "joint": "lleglowj",
+      "type": "hinge",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "min_deg": -150.0,
+      "max_deg": 10.0
+    },
+    {
+      "joint": "rleglowj",
+      "type": "hinge",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "min_deg": -150.0,
+      "max_deg": 10.0
+    },
+    {
+      "joint": "lfootj",
+      "type": "hinge",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "min_deg": -40.0,
+      "max_deg": 30.0
+    },
+    {
+      "joint": "rfootj",
+      "type": "hinge",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "min_deg": -40.0,
+      "max_deg": 30.0
+    },
+    {
+      "joint": "ltoesj",
+      "type": "endpoint",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit."
+    },
+    {
+      "joint": "rtoesj",
+      "type": "endpoint",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit."
+    },
+    {
+      "joint": "larmuppj",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        -0.9945631314748982,
+        0.051665617219475234,
+        -0.09041483013408166
+      ],
+      "max_swing_deg": 120.0,
+      "max_twist_deg": 60.0
+    },
+    {
+      "joint": "rarmuppj",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        0.9945631314748982,
+        0.051665617219475234,
+        -0.09041483013408166
+      ],
+      "max_swing_deg": 120.0,
+      "max_twist_deg": 60.0
+    },
+    {
+      "joint": "larmlowj",
+      "type": "hinge",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "axis": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "min_deg": 0.0,
+      "max_deg": 150.0
+    },
+    {
+      "joint": "rarmlowj",
+      "type": "hinge",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "min_deg": 0.0,
+      "max_deg": 150.0
+    },
+    {
+      "joint": "lhandj",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        -0.9804342574065528,
+        0.18854504950126016,
+        -0.05656351485037805
+      ],
+      "max_swing_deg": 60.0,
+      "max_twist_deg": 40.0
+    },
+    {
+      "joint": "rhandj",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        0.9804342574065528,
+        0.18854504950126016,
+        -0.05656351485037805
+      ],
+      "max_swing_deg": 60.0,
+      "max_twist_deg": 40.0
+    },
+    {
+      "joint": "lfingj",
+      "type": "endpoint",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit."
+    },
+    {
+      "joint": "rfingj",
+      "type": "endpoint",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit."
+    }
+  ]
+};
+
+const JOINTS = ["legrootj","spine1j","spine2j","armrootj","neckj","headj","lleguppj","lleglowj","lfootj","ltoesj","rleguppj","rleglowj","rfootj","rtoesj","larmuppj","larmlowj","lhandj","lfingj","rarmuppj","rarmlowj","rhandj","rfingj"];
+const BONES = [
+  ["spine1b","legrootj","spine1j"],["spine2b","spine1j","spine2j"],["spine3b","spine2j","armrootj"],
+  ["neckb","armrootj","neckj"],["headb","neckj","headj"],
+  ["llegrootb","legrootj","lleguppj"],["lleguppb","lleguppj","lleglowj"],["lleglowb","lleglowj","lfootj"],["lfootb","lfootj","ltoesj"],
+  ["rlegrootb","legrootj","rleguppj"],["rleguppb","rleguppj","rleglowj"],["rleglowb","rleglowj","rfootj"],["rfootb","rfootj","rtoesj"],
+  ["larmrootb","armrootj","larmuppj"],["larmuppb","larmuppj","larmlowj"],["larmlowb","larmlowj","lhandj"],["lhandb","lhandj","lfingj"],
+  ["rarmrootb","armrootj","rarmuppj"],["rarmuppb","rarmuppj","rarmlowj"],["rarmlowb","rarmlowj","rhandj"],["rhandb","rhandj","rfingj"]
+];
+const SPEC = {
+  spine1b:["vertical",1], spine2b:["vertical",1], spine3b:["vertical",1], neckb:["vertical",1], headb:["vertical",1],
+  llegrootb:["lateral",-1], lleguppb:["vertical",-1], lleglowb:["vertical",-1], lfootb:["forward",1],
+  rlegrootb:["lateral",1], rleguppb:["vertical",-1], rleglowb:["vertical",-1], rfootb:["forward",1],
+  larmrootb:["lateral",-1], larmuppb:["lateral",-1], larmlowb:["lateral",-1], lhandb:["lateral",-1],
+  rarmrootb:["lateral",1], rarmuppb:["lateral",1], rarmlowb:["lateral",1], rhandb:["lateral",1]
+};
+const GROUPS = [
+  ["SPINE AND HEAD", ["spine1b","spine2b","spine3b","neckb","headb"]],
+  ["LEFT LEG", ["llegrootb","lleguppb","lleglowb","lfootb"]],
+  ["RIGHT LEG", ["rlegrootb","rleguppb","rleglowb","rfootb"]],
+  ["LEFT ARM", ["larmrootb","larmuppb","larmlowb","lhandb"]],
+  ["RIGHT ARM", ["rarmrootb","rarmuppb","rarmlowb","rhandb"]]
+];
+const ANGLE_LABEL = {
+  vertical: ["lateral deg (+X)", "sagittal deg (+Y)"],
+  lateral: ["forward deg (+Y)", "drop deg"],
+  forward: ["pitch down deg", "lateral deg (+X)"]
+};
+
+let body = structuredClone(NEUTRAL);
+let showJoints = true;
+let showBones = false;
+let yaw = 0.85, pitch = 0.38, dist = 3.5;
+const target = {x:0, y:0.02, z:0.95};
+let dragging = false, lastX = 0, lastY = 0;
+
+const side = document.getElementById("side");
+const canvas = document.getElementById("view");
+const ctx = canvas.getContext("2d");
+const statusBar = document.getElementById("status");
+
+function mag(v) { return Math.hypot(v[0], v[1], v[2]); }
+function norm(v) { const m = mag(v) || 1; return [v[0]/m, v[1]/m, v[2]/m]; }
+function add(a, b) { return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function rad(d) { return d * Math.PI / 180; }
+function deg(r) { return r * 180 / Math.PI; }
+function boneOf(name) { return body.bones.find(b => b.name === name); }
+function jointOf(name) { return body.joints.find(j => j.name === name); }
+
+function finalize() {
+  const pos = {legrootj: jointOf("legrootj").rest_position_m.slice()};
+  for (const spec of BONES) {
+    const bone = boneOf(spec[0]);
+    const length = mag(bone.rest_vector_m);
+    bone.length_m = length;
+    bone.rest_direction = norm(bone.rest_vector_m);
+    bone.locked = true;
+    bone.parent_joint = spec[1];
+    bone.child_joint = spec[2];
+    pos[spec[2]] = add(pos[spec[1]], bone.rest_vector_m);
+    jointOf(spec[2]).rest_position_m = pos[spec[2]].slice();
+  }
+  jointOf("legrootj").rest_position_m = pos.legrootj.slice();
+}
+
+function setLength(bone, length) {
+  const direction = norm(bone.rest_vector_m);
+  bone.length_m = length;
+  bone.rest_vector_m = direction.map(c => c * length);
+  finalize();
+}
+
+function setDirection(bone, direction) {
+  const unit = norm(direction);
+  bone.rest_vector_m = unit.map(c => c * bone.length_m);
+  finalize();
+}
+
+function readAngles(bone) {
+  const spec = SPEC[bone.name];
+  const u = norm(bone.rest_vector_m);
+  if (spec[0] === "vertical") return [deg(Math.asin(clamp(u[0], -1, 1))), deg(Math.asin(clamp(u[1], -1, 1)))];
+  if (spec[0] === "lateral") return [deg(Math.asin(clamp(u[1], -1, 1))), deg(Math.asin(clamp(-u[2], -1, 1)))];
+  return [deg(Math.asin(clamp(-u[2], -1, 1))), deg(Math.asin(clamp(u[0], -1, 1)))];
+}
+
+function writeAngles(bone, a, b) {
+  const spec = SPEC[bone.name];
+  const ar = rad(a), br = rad(b);
+  let direction;
+  if (spec[0] === "vertical") {
+    const x = Math.sin(ar), y = Math.sin(br);
+    direction = [x, y, spec[1] * Math.sqrt(Math.max(1e-6, 1 - x*x - y*y))];
+  } else if (spec[0] === "lateral") {
+    const y = Math.sin(ar), z = -Math.sin(br);
+    direction = [spec[1] * Math.sqrt(Math.max(1e-6, 1 - y*y - z*z)), y, z];
+  } else {
+    const z = -Math.sin(ar), x = Math.sin(br);
+    direction = [x, Math.sqrt(Math.max(1e-6, 1 - x*x - z*z)), z];
+  }
+  setDirection(bone, direction);
+}
+
+function validate(doc) {
+  const errors = [];
+  const fail = (m) => errors.push(m);
+  if (!doc || doc.format !== "PROC_BODY") fail('format must be "PROC_BODY"');
+  if (!doc || doc.version !== 1) fail("version must be 1");
+  if (!doc || doc.skeleton !== "proc_humanoid_v0") fail('skeleton must be "proc_humanoid_v0"');
+  if (!doc.anthropometry) fail("anthropometry is missing");
+  else {
+    for (const key of ["stature_m","shoulder_breadth_m","hip_breadth_m","hand_length_m","foot_length_m"]) {
+      const value = doc.anthropometry[key];
+      if (!(typeof value === "number") || !Number.isFinite(value) || value <= 0) fail("anthropometry." + key + " must be a positive number");
+    }
+  }
+  const joints = new Map((doc.joints || []).map(j => [j.name, j]));
+  if (joints.size !== (doc.joints || []).length) fail("duplicate joint name");
+  for (const name of JOINTS) if (!joints.has(name)) fail('missing joint "' + name + '"');
+  const bones = new Map((doc.bones || []).map(b => [b.name, b]));
+  if (bones.size !== (doc.bones || []).length) fail("duplicate bone name");
+  for (const spec of BONES) {
+    const bone = bones.get(spec[0]);
+    if (!bone) { fail('missing bone "' + spec[0] + '"'); continue; }
+    if (bone.parent_joint !== spec[1] || bone.child_joint !== spec[2]) fail('invalid hierarchy: bone "' + bone.name + '"');
+    if (bone.locked !== true) fail('bone "' + bone.name + '" must be locked');
+    const vector = bone.rest_vector_m;
+    if (!vector || vector.length !== 3 || vector.some(v => !Number.isFinite(v))) { fail('bone "' + bone.name + '" rest vector is not finite'); continue; }
+    const length = mag(vector);
+    if (!(bone.length_m > 1e-6)) fail('bone "' + bone.name + '" has a zero or negative length');
+    else if (Math.abs(length - bone.length_m) > 1e-4) fail('bone "' + bone.name + '" length_m does not match rest_vector_m');
+    const direction = bone.rest_direction;
+    if (!direction || Math.abs(mag(direction) - 1) > 1e-4) fail('bone "' + bone.name + '" rest_direction is not normalized');
+    else if (mag(direction.map((c, i) => c - vector[i] / length)) > 1e-4) fail('bone "' + bone.name + '" rest_direction does not match normalize(rest_vector_m)');
+    const parent = joints.get(bone.parent_joint);
+    const child = joints.get(bone.child_joint);
+    if (parent && child) {
+      const expected = add(parent.rest_position_m, vector);
+      const error = mag(expected.map((c, i) => c - child.rest_position_m[i]));
+      if (error > 1e-4) fail('bone "' + bone.name + '" rest vector does not meet the child rest position');
+    }
+  }
+  const constraints = new Map((doc.constraints || []).map(c => [c.joint, c]));
+  for (const name of JOINTS) {
+    const constraint = constraints.get(name);
+    if (!constraint) { fail('missing constraint for "' + name + '"'); continue; }
+    if (!["root","hinge","ball","endpoint"].includes(constraint.type)) fail('unknown constraint type on "' + name + '"');
+  }
+  if (constraints.get("legrootj") && constraints.get("legrootj").type !== "root") fail("legrootj constraint type must be root");
+  return errors;
+}
+
+function exportDocument() {
+  finalize();
+  const anthro = {description: body.anthropometry.description};
+  for (const [key, value] of Object.entries(body.anthropometry)) if (key !== "description") anthro[key] = value;
+  return {
+    format: "PROC_BODY",
+    version: 1,
+    skeleton: "proc_humanoid_v0",
+    name: body.name || "neutral",
+    anthropometry: anthro,
+    joints: JOINTS.map(name => ({name, rest_position_m: jointOf(name).rest_position_m.slice()})),
+    bones: BONES.map(spec => {
+      const bone = boneOf(spec[0]);
+      return {
+        name: bone.name, parent_joint: spec[1], child_joint: spec[2],
+        length_m: bone.length_m, rest_direction: bone.rest_direction.slice(),
+        rest_vector_m: bone.rest_vector_m.slice(), locked: true
+      };
+    }),
+    constraints: body.constraints
+  };
+}
+
+function el(tag, text) { const node = document.createElement(tag); if (text) node.textContent = text; return node; }
+
+function rebuild() {
+  side.innerHTML = "";
+  const anthroTitle = el("h2", "ANTHROPOMETRY");
+  side.appendChild(anthroTitle);
+  const note = el("p", "External reference only. These numbers do not set joint-center spacing or bone length.");
+  note.className = "note";
+  side.appendChild(note);
+  for (const [key, value] of Object.entries(body.anthropometry)) {
+    if (key === "description") continue;
+    const row = el("label"); row.className = "row";
+    row.appendChild(el("span", key));
+    const input = document.createElement("input");
+    input.type = "number"; input.step = "0.001"; input.min = "0.01"; input.value = value;
+    input.addEventListener("input", () => { body.anthropometry[key] = Number(input.value); refreshStatus(); });
+    row.appendChild(input);
+    row.appendChild(el("span", "m"));
+    side.appendChild(row);
+  }
+
+  const rootTitle = el("h2", "ROOT legrootj");
+  side.appendChild(rootTitle);
+  const root = jointOf("legrootj");
+  ["x","y","z"].forEach((axis, index) => {
+    const row = el("label"); row.className = "row";
+    row.appendChild(el("span", axis + " m"));
+    const input = document.createElement("input");
+    input.type = "number"; input.step = "0.001"; input.value = root.rest_position_m[index].toFixed(4);
+    input.addEventListener("input", () => {
+      root.rest_position_m[index] = Number(input.value);
+      finalize(); refreshStatus(); draw();
+    });
+    row.appendChild(input);
+    row.appendChild(document.createElement("span"));
+    side.appendChild(row);
+  });
+  const plant = el("button", "Plant toes on z = 0");
+  plant.addEventListener("click", () => {
+    const lowest = Math.min(jointOf("ltoesj").rest_position_m[2], jointOf("rtoesj").rest_position_m[2]);
+    root.rest_position_m[2] -= lowest;
+    finalize(); rebuild();
+  });
+  side.appendChild(plant);
+
+  const geo = el("h2", "SKELETON GEOMETRY");
+  side.appendChild(geo);
+  const geoNote = el("p", "Length stays locked while the two angles change the rest direction. The bind pose is a T-pose.");
+  geoNote.className = "note";
+  side.appendChild(geoNote);
+
+  for (const [title, names] of GROUPS) {
+    side.appendChild(el("h2", title));
+    for (const name of names) {
+      const bone = boneOf(name);
+      const box = el("div"); box.className = "bone";
+      box.appendChild(el("b", name));
+      const angles = readAngles(bone);
+      const lengthRow = sliderRow("length m", bone.length_m, 0.03, 0.8, 0.001, (value) => {
+        setLength(bone, value);
+        refreshBone(name);
+        refreshStatus(); draw();
+      });
+      box.appendChild(lengthRow.row);
+      const labels = ANGLE_LABEL[SPEC[name][0]];
+      const aRow = sliderRow(labels[0], angles[0], -75, 75, 0.1, (value) => {
+        const current = readAngles(bone);
+        writeAngles(bone, value, current[1]);
+        refreshBone(name);
+        refreshStatus(); draw();
+      });
+      const bRow = sliderRow(labels[1], angles[1], -75, 75, 0.1, (value) => {
+        const current = readAngles(bone);
+        writeAngles(bone, current[0], value);
+        refreshBone(name);
+        refreshStatus(); draw();
+      });
+      box.appendChild(aRow.row);
+      box.appendChild(bRow.row);
+      const readout = el("div"); readout.className = "readout"; readout.dataset.bone = name;
+      box.appendChild(readout);
+      side.appendChild(box);
+      refreshBone(name);
+    }
+  }
+
+  side.appendChild(el("h2", "VIEW"));
+  const front = el("button", "Front"); front.onclick = () => { yaw = Math.PI/2; pitch = 0.18; draw(); };
+  const sideView = el("button", "Side"); sideView.onclick = () => { yaw = 0; pitch = 0.18; draw(); };
+  const three = el("button", "3/4"); three.onclick = () => { yaw = Math.PI/4; pitch = 0.36; draw(); };
+  side.appendChild(front); side.appendChild(sideView); side.appendChild(three);
+  const jointsBox = checkbox("joint labels", showJoints, (v) => { showJoints = v; draw(); });
+  const bonesBox = checkbox("bone names + lengths", showBones, (v) => { showBones = v; draw(); });
+  side.appendChild(jointsBox); side.appendChild(bonesBox);
+
+  side.appendChild(el("h2", "FILE"));
+  const preset = el("button", "Neutral preset");
+  preset.onclick = () => { body = structuredClone(NEUTRAL); rebuild(); };
+  const file = document.createElement("input"); file.type = "file"; file.accept = ".json,application/json";
+  file.addEventListener("change", () => {
+    const picked = file.files[0]; if (!picked) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try { body = JSON.parse(reader.result); rebuild(); }
+      catch (error) { statusBar.textContent = "JSON parse error: " + error.message; }
+    };
+    reader.readAsText(picked);
+  });
+  const exportButton = el("button", "Export PROC BODY");
+  exportButton.id = "export";
+  exportButton.onclick = () => {
+    const doc = exportDocument();
+    const blob = new Blob([JSON.stringify(doc, null, 2) + "\n"], {type: "application/json"});
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = (doc.name || "body") + ".procbody.json";
+    link.click();
+  };
+  side.appendChild(preset); side.appendChild(file); side.appendChild(document.createElement("br")); side.appendChild(exportButton);
+  side.appendChild(el("h2", "VALIDATION"));
+  const errors = el("div"); errors.id = "errors"; side.appendChild(errors);
+  refreshStatus();
+  draw();
+}
+
+function sliderRow(label, value, min, max, step, onInput) {
+  const row = el("label"); row.className = "row";
+  row.appendChild(el("span", label));
+  const slider = document.createElement("input");
+  slider.type = "range"; slider.min = min; slider.max = max; slider.step = step; slider.value = value;
+  const number = document.createElement("input");
+  number.type = "number"; number.min = min; number.max = max; number.step = step; number.value = Number(value).toFixed(3);
+  const apply = (raw) => {
+    const next = clamp(Number(raw), min, max);
+    slider.value = next; number.value = next.toFixed(3); onInput(next);
+  };
+  slider.addEventListener("input", () => apply(slider.value));
+  number.addEventListener("change", () => apply(number.value));
+  row.appendChild(slider); row.appendChild(number);
+  return {row, slider, number};
+}
+
+function checkbox(label, checked, onChange) {
+  const row = el("label");
+  const input = document.createElement("input");
+  input.type = "checkbox"; input.checked = checked;
+  input.addEventListener("change", () => onChange(input.checked));
+  row.appendChild(input); row.appendChild(document.createTextNode(" " + label));
+  return row;
+}
+
+function refreshBone(name) {
+  const bone = boneOf(name);
+  const node = side.querySelector('[data-bone="' + name + '"]');
+  if (!node || !bone) return;
+  const v = bone.rest_vector_m.map(c => c.toFixed(4)).join(", ");
+  node.textContent = "vector [" + v + "]   length " + bone.length_m.toFixed(4) + " m";
+}
+
+function refreshStatus() {
+  finalize();
+  const doc = exportDocument();
+  const errors = validate(doc);
+  const box = document.getElementById("errors");
+  const button = document.getElementById("export");
+  if (box) {
+    box.className = errors.length ? "" : "ok";
+    box.textContent = errors.length ? errors.join("\n") : "PASS  proc_humanoid_v0  " + JOINTS.length + " joints  " + BONES.length + " bones";
+  }
+  if (button) button.disabled = errors.length > 0;
+  const height = jointOf("headj").rest_position_m[2] - Math.min(jointOf("ltoesj").rest_position_m[2], jointOf("rtoesj").rest_position_m[2]);
+  statusBar.textContent = errors.length
+    ? ("VALIDATION FAIL  " + errors.length + " error(s)")
+    : ("VALIDATION PASS   joint-center height " + height.toFixed(3) + " m   stature reference " + body.anthropometry.stature_m + " m");
+}
+
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+  canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+  draw();
+}
+
+function cameraBasis() {
+  const cp = Math.cos(pitch), sp = Math.sin(pitch), cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const eye = {x: target.x + dist*cp*cy, y: target.y + dist*cp*sy, z: target.z + dist*sp};
+  let fx = target.x - eye.x, fy = target.y - eye.y, fz = target.z - eye.z;
+  const fl = Math.hypot(fx, fy, fz) || 1; fx /= fl; fy /= fl; fz /= fl;
+  let rx = fy*1 - fz*0, ry = fz*0 - fx*1, rz = fx*0 - fy*0;
+  const rl = Math.hypot(rx, ry, rz) || 1; rx /= rl; ry /= rl; rz /= rl;
+  const ux = ry*fz - rz*fy, uy = rz*fx - rx*fz, uz = rx*fy - ry*fx;
+  return {eye, right:[rx,ry,rz], up:[ux,uy,uz], forward:[fx,fy,fz]};
+}
+
+function project(point, cam) {
+  const vx = point[0] - cam.eye.x, vy = point[1] - cam.eye.y, vz = point[2] - cam.eye.z;
+  const x = vx*cam.right[0] + vy*cam.right[1] + vz*cam.right[2];
+  const y = vx*cam.up[0] + vy*cam.up[1] + vz*cam.up[2];
+  const z = vx*cam.forward[0] + vy*cam.forward[1] + vz*cam.forward[2];
+  if (z < 0.05) return null;
+  const focal = canvas.height * 0.9;
+  return {x: canvas.width/2 + x / z * focal, y: canvas.height/2 - y / z * focal, z, s: focal / z};
+}
+
+function draw() {
+  if (!canvas.width) return;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#101010";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const cam = cameraBasis();
+  ctx.strokeStyle = "#333";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = -4; i <= 4; i += 0.5) {
+    const a = project([i, -4, 0], cam), b = project([i, 4, 0], cam);
+    const c = project([-4, i, 0], cam), d = project([4, i, 0], cam);
+    if (a && b) { ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); }
+    if (c && d) { ctx.moveTo(c.x, c.y); ctx.lineTo(d.x, d.y); }
+  }
+  ctx.stroke();
+  const items = [];
+  for (const spec of BONES) {
+    const bone = boneOf(spec[0]);
+    const parent = jointOf(spec[1]).rest_position_m;
+    const child = jointOf(spec[2]).rest_position_m;
+    const mid = [(parent[0]+child[0])/2, (parent[1]+child[1])/2, (parent[2]+child[2])/2];
+    const projected = project(mid, cam);
+    if (projected) items.push({kind:"bone", z: projected.z, bone, parent, child});
+  }
+  for (const name of JOINTS) {
+    const point = jointOf(name).rest_position_m;
+    const projected = project(point, cam);
+    if (projected) items.push({kind:"joint", z: projected.z, name, point});
+  }
+  items.sort((a, b) => b.z - a.z);
+  ctx.font = "12px Arial";
+  ctx.textAlign = "left";
+  for (const item of items) {
+    if (item.kind === "bone") {
+      const a = project(item.parent, cam), b = project(item.child, cam);
+      if (!a || !b) continue;
+      const left = item.bone.name[0] === "l";
+      const right = item.bone.name[0] === "r";
+      ctx.strokeStyle = left ? "#c8c8c8" : right ? "#8a8a8a" : "#b0b0b0";
+      ctx.lineWidth = clamp(0.013 * ((a.s + b.s) / 2), 2, 18);
+      ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      if (showBones) {
+        ctx.fillStyle = "#ddd";
+        ctx.fillText(item.bone.name + " " + item.bone.length_m.toFixed(3) + " m", (a.x+b.x)/2 + 6, (a.y+b.y)/2);
+      }
+    } else {
+      const p = project(item.point, cam);
+      if (!p) continue;
+      const radius = (item.name === "legrootj" ? 0.03 : 0.02) * p.s;
+      ctx.fillStyle = item.name === "legrootj" ? "#f2f2f2" : "#dedede";
+      ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2, radius), 0, Math.PI*2); ctx.fill();
+      if (showJoints) { ctx.fillStyle = "#eee"; ctx.fillText(item.name, p.x + radius + 3, p.y); }
+    }
+  }
+}
+
+canvas.addEventListener("mousedown", (event) => { dragging = true; lastX = event.clientX; lastY = event.clientY; canvas.style.cursor = "grabbing"; });
+window.addEventListener("mouseup", () => { dragging = false; canvas.style.cursor = "grab"; });
+window.addEventListener("mousemove", (event) => {
+  if (!dragging) return;
+  yaw -= (event.clientX - lastX) * 0.008;
+  pitch = clamp(pitch - (event.clientY - lastY) * 0.008, -1.15, 1.15);
+  lastX = event.clientX; lastY = event.clientY;
+  draw();
+});
+canvas.addEventListener("wheel", (event) => {
+  event.preventDefault();
+  dist = clamp(dist * Math.exp(event.deltaY * 0.001), 0.6, 16);
+  draw();
+}, {passive:false});
+window.addEventListener("resize", resize);
+finalize();
+rebuild();
+resize();
+</script>
+</body>
+</html>

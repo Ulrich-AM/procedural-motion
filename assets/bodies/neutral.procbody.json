@@ -1,0 +1,800 @@
+{
+  "format": "PROC_BODY",
+  "version": 1,
+  "skeleton": "proc_humanoid_v0",
+  "name": "neutral",
+  "anthropometry": {
+    "description": "External reference measurements only. They are not joint-center distances and they do not drive bone lengths.",
+    "stature_m": 1.75,
+    "shoulder_breadth_m": 0.41,
+    "hip_breadth_m": 0.34,
+    "chest_breadth_m": 0.31,
+    "hand_length_m": 0.19,
+    "foot_length_m": 0.265,
+    "head_height_m": 0.23,
+    "arm_span_m": 1.78
+  },
+  "joints": [
+    {
+      "name": "legrootj",
+      "rest_position_m": [
+        0.0,
+        0.0,
+        0.992
+      ]
+    },
+    {
+      "name": "spine1j",
+      "rest_position_m": [
+        0.0,
+        -0.024,
+        1.1139999999999999
+      ]
+    },
+    {
+      "name": "spine2j",
+      "rest_position_m": [
+        0.0,
+        0.018000000000000002,
+        1.2519999999999998
+      ]
+    },
+    {
+      "name": "armrootj",
+      "rest_position_m": [
+        0.0,
+        -0.03,
+        1.4059999999999997
+      ]
+    },
+    {
+      "name": "neckj",
+      "rest_position_m": [
+        0.008,
+        0.013999999999999999,
+        1.5119999999999998
+      ]
+    },
+    {
+      "name": "headj",
+      "rest_position_m": [
+        -0.009999999999999998,
+        0.034,
+        1.7299999999999998
+      ]
+    },
+    {
+      "name": "lleguppj",
+      "rest_position_m": [
+        -0.096,
+        -0.018,
+        0.9279999999999999
+      ]
+    },
+    {
+      "name": "lleglowj",
+      "rest_position_m": [
+        -0.07200000000000001,
+        0.014000000000000002,
+        0.49999999999999994
+      ]
+    },
+    {
+      "name": "lfootj",
+      "rest_position_m": [
+        -0.08800000000000001,
+        -0.005999999999999998,
+        0.08199999999999996
+      ]
+    },
+    {
+      "name": "ltoesj",
+      "rest_position_m": [
+        -0.08600000000000001,
+        0.196,
+        -4.163336342344337e-17
+      ]
+    },
+    {
+      "name": "rleguppj",
+      "rest_position_m": [
+        0.096,
+        -0.018,
+        0.9279999999999999
+      ]
+    },
+    {
+      "name": "rleglowj",
+      "rest_position_m": [
+        0.07200000000000001,
+        0.014000000000000002,
+        0.49999999999999994
+      ]
+    },
+    {
+      "name": "rfootj",
+      "rest_position_m": [
+        0.08800000000000001,
+        -0.005999999999999998,
+        0.08199999999999996
+      ]
+    },
+    {
+      "name": "rtoesj",
+      "rest_position_m": [
+        0.08600000000000001,
+        0.196,
+        -4.163336342344337e-17
+      ]
+    },
+    {
+      "name": "larmuppj",
+      "rest_position_m": [
+        -0.188,
+        -0.009999999999999998,
+        1.3839999999999997
+      ]
+    },
+    {
+      "name": "larmlowj",
+      "rest_position_m": [
+        -0.496,
+        0.006000000000000002,
+        1.3559999999999997
+      ]
+    },
+    {
+      "name": "lhandj",
+      "rest_position_m": [
+        -0.748,
+        0.020000000000000004,
+        1.3459999999999996
+      ]
+    },
+    {
+      "name": "lfingj",
+      "rest_position_m": [
+        -0.852,
+        0.04000000000000001,
+        1.3399999999999996
+      ]
+    },
+    {
+      "name": "rarmuppj",
+      "rest_position_m": [
+        0.188,
+        -0.009999999999999998,
+        1.3839999999999997
+      ]
+    },
+    {
+      "name": "rarmlowj",
+      "rest_position_m": [
+        0.496,
+        0.006000000000000002,
+        1.3559999999999997
+      ]
+    },
+    {
+      "name": "rhandj",
+      "rest_position_m": [
+        0.748,
+        0.020000000000000004,
+        1.3459999999999996
+      ]
+    },
+    {
+      "name": "rfingj",
+      "rest_position_m": [
+        0.852,
+        0.04000000000000001,
+        1.3399999999999996
+      ]
+    }
+  ],
+  "bones": [
+    {
+      "name": "spine1b",
+      "parent_joint": "legrootj",
+      "child_joint": "spine1j",
+      "length_m": 0.12433824833895642,
+      "rest_direction": [
+        0.0,
+        -0.1930218602933347,
+        0.981194456491118
+      ],
+      "rest_vector_m": [
+        0.0,
+        -0.024,
+        0.122
+      ],
+      "locked": true
+    },
+    {
+      "name": "spine2b",
+      "parent_joint": "spine1j",
+      "child_joint": "spine2j",
+      "length_m": 0.1442497833620557,
+      "rest_direction": [
+        0.0,
+        0.291161615782696,
+        0.9566738804288584
+      ],
+      "rest_vector_m": [
+        0.0,
+        0.042,
+        0.138
+      ],
+      "locked": true
+    },
+    {
+      "name": "spine3b",
+      "parent_joint": "spine2j",
+      "child_joint": "armrootj",
+      "length_m": 0.1613071604114337,
+      "rest_direction": [
+        0.0,
+        -0.29756893542462787,
+        0.9547003344873477
+      ],
+      "rest_vector_m": [
+        0.0,
+        -0.048,
+        0.154
+      ],
+      "locked": true
+    },
+    {
+      "name": "neckb",
+      "parent_joint": "armrootj",
+      "child_joint": "neckj",
+      "length_m": 0.11504781614615725,
+      "rest_direction": [
+        0.06953630471209263,
+        0.3824496759165094,
+        0.9213560374352272
+      ],
+      "rest_vector_m": [
+        0.008,
+        0.044,
+        0.106
+      ],
+      "locked": true
+    },
+    {
+      "name": "headb",
+      "parent_joint": "neckj",
+      "child_joint": "headj",
+      "length_m": 0.21965427380317462,
+      "rest_direction": [
+        -0.08194696004926924,
+        0.0910521778325214,
+        0.9924687383744831
+      ],
+      "rest_vector_m": [
+        -0.018,
+        0.02,
+        0.218
+      ],
+      "locked": true
+    },
+    {
+      "name": "llegrootb",
+      "parent_joint": "legrootj",
+      "child_joint": "lleguppj",
+      "length_m": 0.11677328461596,
+      "rest_direction": [
+        -0.8221058465189323,
+        -0.1541448462222998,
+        -0.5480705643459548
+      ],
+      "rest_vector_m": [
+        -0.096,
+        -0.018,
+        -0.064
+      ],
+      "locked": true
+    },
+    {
+      "name": "lleguppb",
+      "parent_joint": "lleguppj",
+      "child_joint": "lleglowj",
+      "length_m": 0.4298650951170611,
+      "rest_direction": [
+        0.05583146962296231,
+        0.07444195949728308,
+        -0.9956612082761611
+      ],
+      "rest_vector_m": [
+        0.024,
+        0.032,
+        -0.428
+      ],
+      "locked": true
+    },
+    {
+      "name": "lleglowb",
+      "parent_joint": "lleglowj",
+      "child_joint": "lfootj",
+      "length_m": 0.41878395384732686,
+      "rest_direction": [
+        -0.038205857347230185,
+        -0.047757321684037735,
+        -0.9981280231963886
+      ],
+      "rest_vector_m": [
+        -0.016,
+        -0.02,
+        -0.418
+      ],
+      "locked": true
+    },
+    {
+      "name": "lfootb",
+      "parent_joint": "lfootj",
+      "child_joint": "ltoesj",
+      "length_m": 0.21801834785173474,
+      "rest_direction": [
+        0.009173539840601477,
+        0.9265275239007492,
+        -0.3761151334646606
+      ],
+      "rest_vector_m": [
+        0.002,
+        0.202,
+        -0.082
+      ],
+      "locked": true
+    },
+    {
+      "name": "rlegrootb",
+      "parent_joint": "legrootj",
+      "child_joint": "rleguppj",
+      "length_m": 0.11677328461596,
+      "rest_direction": [
+        0.8221058465189323,
+        -0.1541448462222998,
+        -0.5480705643459548
+      ],
+      "rest_vector_m": [
+        0.096,
+        -0.018,
+        -0.064
+      ],
+      "locked": true
+    },
+    {
+      "name": "rleguppb",
+      "parent_joint": "rleguppj",
+      "child_joint": "rleglowj",
+      "length_m": 0.4298650951170611,
+      "rest_direction": [
+        -0.05583146962296231,
+        0.07444195949728308,
+        -0.9956612082761611
+      ],
+      "rest_vector_m": [
+        -0.024,
+        0.032,
+        -0.428
+      ],
+      "locked": true
+    },
+    {
+      "name": "rleglowb",
+      "parent_joint": "rleglowj",
+      "child_joint": "rfootj",
+      "length_m": 0.41878395384732686,
+      "rest_direction": [
+        0.038205857347230185,
+        -0.047757321684037735,
+        -0.9981280231963886
+      ],
+      "rest_vector_m": [
+        0.016,
+        -0.02,
+        -0.418
+      ],
+      "locked": true
+    },
+    {
+      "name": "rfootb",
+      "parent_joint": "rfootj",
+      "child_joint": "rtoesj",
+      "length_m": 0.21801834785173474,
+      "rest_direction": [
+        -0.009173539840601477,
+        0.9265275239007492,
+        -0.3761151334646606
+      ],
+      "rest_vector_m": [
+        -0.002,
+        0.202,
+        -0.082
+      ],
+      "locked": true
+    },
+    {
+      "name": "larmrootb",
+      "parent_joint": "armrootj",
+      "child_joint": "larmuppj",
+      "length_m": 0.19033654404764208,
+      "rest_direction": [
+        -0.9877241437826189,
+        0.10507703657261903,
+        -0.11558474022988093
+      ],
+      "rest_vector_m": [
+        -0.188,
+        0.02,
+        -0.022
+      ],
+      "locked": true
+    },
+    {
+      "name": "larmuppb",
+      "parent_joint": "larmuppj",
+      "child_joint": "larmlowj",
+      "length_m": 0.3096837096135346,
+      "rest_direction": [
+        -0.9945631314748982,
+        0.051665617219475234,
+        -0.09041483013408166
+      ],
+      "rest_vector_m": [
+        -0.308,
+        0.016,
+        -0.028
+      ],
+      "locked": true
+    },
+    {
+      "name": "larmlowb",
+      "parent_joint": "larmlowj",
+      "child_joint": "lhandj",
+      "length_m": 0.2525866188063018,
+      "rest_direction": [
+        -0.9976775539057687,
+        0.055426530772542705,
+        -0.03959037912324479
+      ],
+      "rest_vector_m": [
+        -0.252,
+        0.014,
+        -0.01
+      ],
+      "locked": true
+    },
+    {
+      "name": "lhandb",
+      "parent_joint": "lhandj",
+      "child_joint": "lfingj",
+      "length_m": 0.10607544484940894,
+      "rest_direction": [
+        -0.9804342574065528,
+        0.18854504950126016,
+        -0.05656351485037805
+      ],
+      "rest_vector_m": [
+        -0.104,
+        0.02,
+        -0.006
+      ],
+      "locked": true
+    },
+    {
+      "name": "rarmrootb",
+      "parent_joint": "armrootj",
+      "child_joint": "rarmuppj",
+      "length_m": 0.19033654404764208,
+      "rest_direction": [
+        0.9877241437826189,
+        0.10507703657261903,
+        -0.11558474022988093
+      ],
+      "rest_vector_m": [
+        0.188,
+        0.02,
+        -0.022
+      ],
+      "locked": true
+    },
+    {
+      "name": "rarmuppb",
+      "parent_joint": "rarmuppj",
+      "child_joint": "rarmlowj",
+      "length_m": 0.3096837096135346,
+      "rest_direction": [
+        0.9945631314748982,
+        0.051665617219475234,
+        -0.09041483013408166
+      ],
+      "rest_vector_m": [
+        0.308,
+        0.016,
+        -0.028
+      ],
+      "locked": true
+    },
+    {
+      "name": "rarmlowb",
+      "parent_joint": "rarmlowj",
+      "child_joint": "rhandj",
+      "length_m": 0.2525866188063018,
+      "rest_direction": [
+        0.9976775539057687,
+        0.055426530772542705,
+        -0.03959037912324479
+      ],
+      "rest_vector_m": [
+        0.252,
+        0.014,
+        -0.01
+      ],
+      "locked": true
+    },
+    {
+      "name": "rhandb",
+      "parent_joint": "rhandj",
+      "child_joint": "rfingj",
+      "length_m": 0.10607544484940894,
+      "rest_direction": [
+        0.9804342574065528,
+        0.18854504950126016,
+        -0.05656351485037805
+      ],
+      "rest_vector_m": [
+        0.104,
+        0.02,
+        -0.006
+      ],
+      "locked": true
+    }
+  ],
+  "constraints": [
+    {
+      "joint": "legrootj",
+      "type": "root",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit."
+    },
+    {
+      "joint": "spine1j",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        0.0,
+        0.291161615782696,
+        0.9566738804288584
+      ],
+      "max_swing_deg": 40.0,
+      "max_twist_deg": 25.0
+    },
+    {
+      "joint": "spine2j",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        0.0,
+        -0.29756893542462787,
+        0.9547003344873477
+      ],
+      "max_swing_deg": 40.0,
+      "max_twist_deg": 25.0
+    },
+    {
+      "joint": "armrootj",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        0.06953630471209263,
+        0.3824496759165094,
+        0.9213560374352272
+      ],
+      "max_swing_deg": 40.0,
+      "max_twist_deg": 25.0
+    },
+    {
+      "joint": "neckj",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        -0.08194696004926924,
+        0.0910521778325214,
+        0.9924687383744831
+      ],
+      "max_swing_deg": 50.0,
+      "max_twist_deg": 40.0
+    },
+    {
+      "joint": "headj",
+      "type": "endpoint",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit."
+    },
+    {
+      "joint": "lleguppj",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        0.05583146962296231,
+        0.07444195949728308,
+        -0.9956612082761611
+      ],
+      "max_swing_deg": 90.0,
+      "max_twist_deg": 40.0
+    },
+    {
+      "joint": "rleguppj",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        -0.05583146962296231,
+        0.07444195949728308,
+        -0.9956612082761611
+      ],
+      "max_swing_deg": 90.0,
+      "max_twist_deg": 40.0
+    },
+    {
+      "joint": "lleglowj",
+      "type": "hinge",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "min_deg": -150.0,
+      "max_deg": 10.0
+    },
+    {
+      "joint": "rleglowj",
+      "type": "hinge",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "min_deg": -150.0,
+      "max_deg": 10.0
+    },
+    {
+      "joint": "lfootj",
+      "type": "hinge",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "min_deg": -40.0,
+      "max_deg": 30.0
+    },
+    {
+      "joint": "rfootj",
+      "type": "hinge",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "min_deg": -40.0,
+      "max_deg": 30.0
+    },
+    {
+      "joint": "ltoesj",
+      "type": "endpoint",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit."
+    },
+    {
+      "joint": "rtoesj",
+      "type": "endpoint",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit."
+    },
+    {
+      "joint": "larmuppj",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        -0.9945631314748982,
+        0.051665617219475234,
+        -0.09041483013408166
+      ],
+      "max_swing_deg": 120.0,
+      "max_twist_deg": 60.0
+    },
+    {
+      "joint": "rarmuppj",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        0.9945631314748982,
+        0.051665617219475234,
+        -0.09041483013408166
+      ],
+      "max_swing_deg": 120.0,
+      "max_twist_deg": 60.0
+    },
+    {
+      "joint": "larmlowj",
+      "type": "hinge",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "axis": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "min_deg": 0.0,
+      "max_deg": 150.0
+    },
+    {
+      "joint": "rarmlowj",
+      "type": "hinge",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "min_deg": 0.0,
+      "max_deg": 150.0
+    },
+    {
+      "joint": "lhandj",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        -0.9804342574065528,
+        0.18854504950126016,
+        -0.05656351485037805
+      ],
+      "max_swing_deg": 60.0,
+      "max_twist_deg": 40.0
+    },
+    {
+      "joint": "rhandj",
+      "type": "ball",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit.",
+      "twist_axis": [
+        0.9804342574065528,
+        0.18854504950126016,
+        -0.05656351485037805
+      ],
+      "max_swing_deg": 60.0,
+      "max_twist_deg": 40.0
+    },
+    {
+      "joint": "lfingj",
+      "type": "endpoint",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit."
+    },
+    {
+      "joint": "rfingj",
+      "type": "endpoint",
+      "authority": "placeholder",
+      "note": "Preliminary placeholder. Not a clinical or measured joint limit."
+    }
+  ]
+}
