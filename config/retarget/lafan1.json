@@ -10,6 +10,8 @@
     "LeftForeArm": ["LeftForeArm", "LeftForearm"],
     "RightForeArm": ["RightForeArm", "RightForearm"],
     "LeftUpLeg": ["LeftUpLeg", "LeftUpperLeg"],
+    "LeftToeBase": ["LeftToeBase", "LeftToe", "LeftToeEnd"],
+    "RightToeBase": ["RightToeBase", "RightToe", "RightToeEnd"],
     "RightUpLeg": ["RightUpLeg", "RightUpperLeg"],
     "Spine1": ["Spine1", "Chest"],
     "Spine2": ["Spine2", "Chest1", "UpperChest"]
@@ -24,14 +26,17 @@
     "lleguppj": "LeftUpLeg",
     "lleglowj": "LeftLeg",
     "lfootj": "LeftFoot",
+    "ltoesj": "LeftToeBase",
     "rleguppj": "RightUpLeg",
     "rleglowj": "RightLeg",
     "rfootj": "RightFoot",
+    "rtoesj": "RightToeBase",
     "larmuppj": "LeftArm",
     "larmlowj": "LeftForeArm",
     "lhandj": "LeftHand",
     "rarmuppj": "RightArm",
     "rarmlowj": "RightForeArm",
     "rhandj": "RightHand"
-  }
+  },
+  "optional": ["ltoesj", "rtoesj"]
 }

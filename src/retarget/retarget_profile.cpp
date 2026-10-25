@@ -104,6 +104,17 @@ Status loadRetargetProfileFromFile(const std::filesystem::path& path, RetargetPr
     profile.target_to_source[*joint] = it.value().get<std::string>();
     profile.required[*joint] = true;
   }
+  if (document.contains("optional") && document["optional"].is_array()) {
+    for (const json& name : document["optional"]) {
+      if (!name.is_string()) continue;
+      const std::optional<int> joint = findJoint(name.get<std::string>());
+      if (!joint) {
+        status.error(profile.name + ": unknown optional joint \"" + name.get<std::string>() + "\"");
+        return status;
+      }
+      profile.required[*joint] = false;
+    }
+  }
   out = std::move(profile);
   return status;
 }
@@ -150,7 +161,7 @@ std::array<int, kJointCount> mappingFromProfile(const RetargetProfile& profile, 
   std::array<int, kJointCount> mapping{};
   mapping.fill(-1);
   for (int joint = 0; joint < kJointCount; ++joint) {
-    if (!profile.required[joint]) continue;
+    if (profile.target_to_source[joint].empty()) continue;
     mapping[joint] = findSourceBySemantic(source_names, profile, profile.target_to_source[joint]);
   }
   return mapping;

@@ -33,6 +33,7 @@ local_assets/
 converted/
 imports/
 analysis_output/
+local_models/
 dist/
 *.fbx
 *.bvh

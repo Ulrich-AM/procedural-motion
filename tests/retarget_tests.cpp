@@ -168,6 +168,15 @@ int runRetargetTests() {
   stats.expect(matched.confidence == "HIGH", "mixamo confidence " + matched.confidence);
   stats.expect(matched.matched == 18 && matched.required == 18, "18 required mappings");
   stats.expect(matched.profile_index >= 0 && profiles[matched.profile_index].name == "mixamo", "detected mixamo");
+  const int left_toe = *proc::findJoint("ltoesj");
+  const int right_toe = *proc::findJoint("rtoesj");
+  stats.expect(matched.mapping[left_toe] < 0 && matched.mapping[right_toe] < 0, "missing toes stay unmapped");
+  std::vector<std::string> with_toes = mixamo_names;
+  with_toes.push_back("mixamorig:LeftToeBase");
+  with_toes.push_back("RightToe");
+  const proc::ProfileMatch toed = proc::matchProfile(profiles, with_toes);
+  stats.expect(toed.confidence == "HIGH" && toed.required == 18, "toes are optional for profile detection");
+  stats.expect(toed.mapping[left_toe] >= 0 && toed.mapping[right_toe] >= 0, "present toe names map to ltoesj and rtoesj");
 
   std::cout << "retarget tests: " << (stats.failed == 0 ? "ok" : "failed") << '\n';
   return stats.failed;

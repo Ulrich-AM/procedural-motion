@@ -30,6 +30,14 @@ std::string writeProcMotionToString(const ProcMotion& motion) {
     nlohmann::json frame = {{"time", pose.time},
                             {"root", {{"translation", vec3Json(pose.root_translation)}, {"rotation", quatJson(pose.root_rotation)}}},
                             {"joints", joints}};
+    if (pose.contacts.block_present) {
+      nlohmann::json contacts = nlohmann::json::object();
+      if (pose.contacts.left_heel) contacts["left_heel"] = *pose.contacts.left_heel;
+      if (pose.contacts.left_toe) contacts["left_toe"] = *pose.contacts.left_toe;
+      if (pose.contacts.right_heel) contacts["right_heel"] = *pose.contacts.right_heel;
+      if (pose.contacts.right_toe) contacts["right_toe"] = *pose.contacts.right_toe;
+      frame["contacts"] = contacts;
+    }
     frames.push_back(std::move(frame));
   }
   nlohmann::json document = {

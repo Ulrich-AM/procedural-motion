@@ -16,6 +16,8 @@
     "LeftUpLeg": ["LeftUpLeg", "mixamorig:LeftUpLeg", "mixamorigLeftUpLeg"],
     "LeftLeg": ["LeftLeg", "mixamorig:LeftLeg", "mixamorigLeftLeg"],
     "LeftFoot": ["LeftFoot", "mixamorig:LeftFoot", "mixamorigLeftFoot"],
+    "LeftToeBase": ["LeftToeBase", "LeftToe", "mixamorig:LeftToeBase", "mixamorigLeftToeBase", "mixamorig:LeftToe"],
+    "RightToeBase": ["RightToeBase", "RightToe", "mixamorig:RightToeBase", "mixamorigRightToeBase", "mixamorig:RightToe"],
     "RightUpLeg": ["RightUpLeg", "mixamorig:RightUpLeg", "mixamorigRightUpLeg"],
     "RightLeg": ["RightLeg", "mixamorig:RightLeg", "mixamorigRightLeg"],
     "RightFoot": ["RightFoot", "mixamorig:RightFoot", "mixamorigRightFoot"],
@@ -36,14 +38,17 @@
     "lleguppj": "LeftUpLeg",
     "lleglowj": "LeftLeg",
     "lfootj": "LeftFoot",
+    "ltoesj": "LeftToeBase",
     "rleguppj": "RightUpLeg",
     "rleglowj": "RightLeg",
     "rfootj": "RightFoot",
+    "rtoesj": "RightToeBase",
     "larmuppj": "LeftArm",
     "larmlowj": "LeftForeArm",
     "lhandj": "LeftHand",
     "rarmuppj": "RightArm",
     "rarmlowj": "RightForeArm",
     "rhandj": "RightHand"
-  }
+  },
+  "optional": ["ltoesj", "rtoesj"]
 }

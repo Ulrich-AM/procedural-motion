@@ -7,7 +7,9 @@
 #include "render/skeleton_renderer.h"
 #include "rig/forward_kinematics.h"
 #include "app/analysis_panel.h"
+#include "app/generator_panel.h"
 #include "app/import_panel.h"
+#include "locomotion/locomotion_generator.h"
 #include "retarget/retargeter.h"
 #include "validation/bone_length_monitor.h"
 #include "validation/tolerances.h"
@@ -146,6 +148,7 @@ struct LabState {
   bool pose_ready = false;
   ImportSession import;
   AnalysisUi analysis_ui;
+  GeneratorUi generator;
   glm::mat4 view{1.0f};
   glm::mat4 projection{1.0f};
 };
@@ -253,10 +256,27 @@ bool cursorInViewport(const LabState& lab) {
   return x >= lab.view_x && x < lab.view_x + lab.view_w && y >= lab.view_y && y < lab.view_y + lab.view_h;
 }
 
-void updatePose(LabState& lab) {
+void updatePose(LabState& lab, double dt) {
   lab.pose_ready = false;
   if (!lab.has_body) return;
   Pose pose;
+  if (lab.generator.enabled && lab.generator.has_model) {
+    if (lab.generator.playing) {
+      LocomotionCommand command;
+      command.desired_speed_mps = lab.generator.desired_speed;
+      command.heading = glm::radians(static_cast<double>(lab.generator.heading_deg));
+      command.max_accel_mps2 = lab.generator.acceleration;
+      command.force = static_cast<RegimeForce>(lab.generator.force);
+      advanceLocomotion(lab.generator.state, lab.generator.model, lab.body, command, dt);
+    }
+    pose = generateLocomotionPose(lab.body, lab.generator.model, lab.generator.state).pose;
+    lab.limits = applyJointLimits(lab.body, pose, lab.limit_mode);
+    lab.world = forwardKinematics(lab.body, lab.limits.pose);
+    lab.bones = measureBoneLengths(lab.body, lab.world, kRuntimeBoneToleranceM);
+    accumulateGeneratorSlip(lab.generator, lab.world, lab.limits.pose, dt);
+    lab.pose_ready = true;
+    return;
+  }
   if (lab.has_motion && lab.motion.skeleton == lab.body.skeleton) pose = lab.player.sample();
   lab.limits = applyJointLimits(lab.body, pose, lab.limit_mode);
   lab.world = forwardKinematics(lab.body, lab.limits.pose);
@@ -315,6 +335,15 @@ void drawSidePanel(LabState& lab) {
     ImGui::TextWrapped("%s", lab.body_status.text().c_str());
   }
 
+  section("MODE");
+  if (ImGui::RadioButton("PLAYBACK", !lab.generator.enabled)) lab.generator.enabled = false;
+  ImGui::SameLine();
+  if (ImGui::RadioButton("GENERATOR", lab.generator.enabled)) lab.generator.enabled = true;
+  if (lab.generator.enabled) {
+    section("GENERATOR");
+    drawGeneratorPanel(lab.generator, lab.window, lab.has_body ? &lab.body : nullptr, lab.has_body, lab.asset_root);
+  }
+  if (!lab.generator.enabled) {
   section("MOTION");
   ImGui::TextWrapped("%s", lab.motion_path.empty() ? "no file" : lab.motion_path.filename().string().c_str());
   if (ImGui::Button("Load motion")) {
@@ -365,6 +394,17 @@ void drawSidePanel(LabState& lab) {
   for (const JointViolation& violation : lab.limits.violations) ImGui::TextWrapped("%s", violation.message.c_str());
   ImGui::EndChild();
 
+  const ImportResult imported = drawImportPanel(lab.import, lab.window, lab.has_body ? &lab.body : nullptr, lab.has_body,
+                                                lab.asset_root, lab.motion, lab.has_motion, lab.motion_path,
+                                                lab.motion_status, lab.player);
+  if (imported.replaced_motion) {
+    rebuildTrajectory(lab);
+    lab.analysis_ui.valid = false;
+  }
+  drawAnalysisSection(lab.analysis_ui, lab.import.has_source ? &lab.import.clip : nullptr, lab.has_motion ? &lab.motion : nullptr,
+                      lab.import.mapping, lab.player, lab.asset_root);
+  }
+
   section("BONE LENGTHS");
   ImGui::Text("MAX BONE LENGTH ERROR %.8f m", lab.pose_ready ? lab.bones.max_error_m : 0.0);
   ImGui::TextUnformatted(!lab.pose_ready ? "BONE LENGTH VALIDATION: NO POSE"
@@ -372,7 +412,7 @@ void drawSidePanel(LabState& lab) {
   if (lab.pose_ready && !lab.bones.ok && lab.bones.worst_index >= 0) {
     ImGui::Text("worst %s", lab.bones.samples[lab.bones.worst_index].bone.c_str());
   }
-  ImGui::BeginChild("bone_errors", ImVec2(0, 180), ImGuiChildFlags_Border);
+  ImGui::BeginChild("bone_errors", ImVec2(0, 140), ImGuiChildFlags_Border);
   for (const BoneLengthSample& sample : lab.bones.samples) {
     ImGui::Text("%s", sample.bone.c_str());
     ImGui::Text("  expected %.6f m", sample.expected_m);
@@ -386,18 +426,21 @@ void drawSidePanel(LabState& lab) {
   ImGui::Checkbox("joint labels", &lab.show_joint_labels);
   ImGui::Checkbox("bone names", &lab.show_bone_labels);
   ImGui::TextWrapped("Head peg is a facing marker, not a bone. LMB orbits. Wheel zooms.");
-  const ImportResult imported = drawImportPanel(lab.import, lab.window, lab.has_body ? &lab.body : nullptr, lab.has_body,
-                                                lab.asset_root, lab.motion, lab.has_motion, lab.motion_path,
-                                                lab.motion_status, lab.player);
-  if (imported.replaced_motion) {
-    rebuildTrajectory(lab);
-    lab.analysis_ui.valid = false;
-  }
-  drawAnalysisSection(lab.analysis_ui, lab.import.has_source ? &lab.import.clip : nullptr, lab.has_motion ? &lab.motion : nullptr,
-                      lab.import.mapping, lab.player, lab.asset_root);
 }
 
 void drawTransport(LabState& lab) {
+  if (lab.generator.enabled) {
+    if (ImGui::Button(lab.generator.playing ? "PAUSE" : "PLAY")) lab.generator.playing = !lab.generator.playing;
+    ImGui::SameLine();
+    if (ImGui::Button("Reset phase")) {
+      lab.generator.state.phase = 0.0;
+      lab.generator.state.root_position = glm::dvec3(0.0);
+      lab.generator.has_previous = false;
+    }
+    ImGui::Text("phase %.3f   actual %.2f m/s   %s", lab.generator.state.phase, lab.generator.state.actual_speed_mps,
+                regimeName(lab.generator.state.regime));
+    return;
+  }
   const bool enabled = lab.has_motion;
   if (!enabled) ImGui::BeginDisabled();
   if (ImGui::Button("|<")) lab.player.jumpStart();
@@ -512,7 +555,10 @@ int Application::run() {
       if (character >= 'A' && character <= 'Z') character = static_cast<char>(character - 'A' + 'a');
     }
     if (extension == ".procmo") loadMotion(*state, path);
-    else if (extension == ".bvh" || extension == ".fbx") {
+    else if (path.filename().string().find("procloco") != std::string::npos) {
+      state->generator.enabled = true;
+      loadLocomotionModel(state->generator, path);
+    } else if (extension == ".bvh" || extension == ".fbx") {
       loadDroppedSource(state->import, path, state->asset_root, state->has_body ? &state->body : nullptr, state->has_body,
                         state->motion, state->has_motion, state->motion_path, state->motion_status, state->player);
     } else loadBody(*state, path);
@@ -528,7 +574,10 @@ int Application::run() {
     for (char& character : extension) {
       if (character >= 'A' && character <= 'Z') character = static_cast<char>(character - 'A' + 'a');
     }
-    if (extension == ".fbx" || extension == ".bvh") {
+    if (path.filename().string().find("procloco") != std::string::npos) {
+      lab.generator.enabled = true;
+      loadLocomotionModel(lab.generator, path);
+    } else if (extension == ".fbx" || extension == ".bvh") {
       loadDroppedSource(lab.import, path, lab.asset_root, lab.has_body ? &lab.body : nullptr, lab.has_body, lab.motion,
                         lab.has_motion, lab.motion_path, lab.motion_status, lab.player);
       lab.import.view = ViewportMode::Overlay;
@@ -552,7 +601,7 @@ int Application::run() {
     if (dt < 0.0) dt = 0.0;
     if (dt > 0.1) dt = 0.1;
     lab.player.update(dt);
-    updatePose(lab);
+    updatePose(lab, dt);
 
     int window_w = 1;
     int window_h = 1;
@@ -615,7 +664,10 @@ int Application::run() {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
-    if (ImGui::IsKeyPressed(ImGuiKey_Space) && !io.WantCaptureKeyboard) lab.player.togglePlay();
+    if (ImGui::IsKeyPressed(ImGuiKey_Space) && !io.WantCaptureKeyboard) {
+      if (lab.generator.enabled) lab.generator.playing = !lab.generator.playing;
+      else lab.player.togglePlay();
+    }
     double mouse_x = 0.0;
     double mouse_y = 0.0;
     glfwGetCursorPos(lab.window, &mouse_x, &mouse_y);

@@ -60,19 +60,33 @@ if(NOT imgui_POPULATED)
   FetchContent_Populate(imgui)
 endif()
 
-add_library(proc_core STATIC
+# Runtime pose generation. No Assimp, importers, retarget, analysis, dataset, or ImGui.
+add_library(proc_runtime STATIC
   src/body/skeleton.cpp
   src/body/proc_body.cpp
   src/body/joint_limits.cpp
   src/motion/proc_motion.cpp
   src/motion/proc_motion_load.cpp
+  src/motion/proc_motion_save.cpp
   src/motion/interpolation.cpp
   src/motion/motion_player.cpp
   src/rig/forward_kinematics.cpp
   src/validation/skeleton_validator.cpp
   src/validation/motion_validator.cpp
   src/validation/bone_length_monitor.cpp
-  src/motion/proc_motion_save.cpp
+  src/locomotion/locomotion_model.cpp
+  src/locomotion/locomotion_model_io.cpp
+  src/locomotion/body_scale.cpp
+  src/locomotion/locomotion_generator.cpp
+  src/locomotion/locomotion_diagnostics.cpp)
+target_include_directories(proc_runtime PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(proc_runtime PUBLIC glm::glm nlohmann_json::nlohmann_json)
+if(MSVC)
+  target_compile_options(proc_runtime PRIVATE /W4 /permissive-)
+  target_compile_definitions(proc_runtime PRIVATE NOMINMAX)
+endif()
+
+add_library(proc_core STATIC
   src/import/source_motion.cpp
   src/import/coordinate_normalizer.cpp
   src/import/bvh_importer.cpp
@@ -90,11 +104,11 @@ add_library(proc_core STATIC
   src/analysis/relationship_model.cpp
   src/analysis/proc_analysis.cpp
   src/analysis/analysis_io.cpp
+  src/analysis/locomotion_model_builder.cpp
   src/dataset/lafan1_index.cpp
   src/dataset/dataset_index.cpp
   src/dataset/batch_analyze.cpp)
-target_include_directories(proc_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(proc_core PUBLIC glm::glm nlohmann_json::nlohmann_json assimp::assimp)
+target_link_libraries(proc_core PUBLIC proc_runtime assimp::assimp)
 if(MSVC)
   target_compile_options(proc_core PRIVATE /W4 /permissive-)
   target_compile_definitions(proc_core PRIVATE NOMINMAX)
@@ -117,8 +131,25 @@ add_executable(proc_motion_lab
   src/app/application.cpp
   src/app/import_panel.cpp
   src/app/analysis_panel.cpp
+  src/app/generator_panel.cpp
   src/render/renderer.cpp
   src/render/skeleton_renderer.cpp)
+
+add_executable(proc_motion_model
+  src/cli/proc_motion_model.cpp)
+target_link_libraries(proc_motion_model PRIVATE proc_core)
+if(MSVC)
+  target_compile_options(proc_motion_model PRIVATE /W4 /permissive-)
+  target_compile_definitions(proc_motion_model PRIVATE NOMINMAX)
+endif()
+
+add_executable(proc_runtime_link
+  tests/runtime_link_main.cpp)
+target_link_libraries(proc_runtime_link PRIVATE proc_runtime)
+if(MSVC)
+  target_compile_options(proc_runtime_link PRIVATE /W4 /permissive-)
+  target_compile_definitions(proc_runtime_link PRIVATE NOMINMAX)
+endif()
 
 add_executable(proc_motion_analyze
   src/cli/proc_motion_analyze.cpp)
@@ -149,7 +180,8 @@ add_executable(proc_motion_tests
   tests/gait_cycle_tests.cpp
   tests/relationship_tests.cpp
   tests/dataset_index_tests.cpp
-  tests/architecture_tests.cpp)
+  tests/architecture_tests.cpp
+  tests/locomotion_tests.cpp)
 target_link_libraries(proc_motion_tests PRIVATE proc_core)
 target_compile_definitions(proc_motion_tests PRIVATE PROCMOTION_SOURCE_DIR="${PROCMOTION_SOURCE_DIR_FWD}")
 if(MSVC)

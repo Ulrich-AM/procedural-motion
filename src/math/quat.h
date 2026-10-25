@@ -69,4 +69,26 @@ inline double quatAngleDegrees(const glm::dquat& q) {
   return glm::degrees(2.0 * std::acos(w));
 }
 
+// Length-only. Does not flip the sign, so a continuous log chain can keep its hemisphere.
+inline glm::dquat quatUnit(glm::dquat rotation) {
+  const double length = quatLength(rotation);
+  if (length < 1e-12) return quatIdentity();
+  return glm::dquat(rotation.w / length, rotation.x / length, rotation.y / length, rotation.z / length);
+}
+
+inline glm::dvec3 quatLog(glm::dquat rotation) {
+  rotation = quatUnit(rotation);
+  const double vector_length = std::sqrt(rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z);
+  if (vector_length < 1e-12) return glm::dvec3(rotation.x, rotation.y, rotation.z);
+  const double half_angle = std::atan2(vector_length, rotation.w);
+  return glm::dvec3(rotation.x, rotation.y, rotation.z) * (half_angle / vector_length);
+}
+
+inline glm::dquat quatExp(const glm::dvec3& log_vector) {
+  const double half_angle = glm::length(log_vector);
+  if (half_angle < 1e-12) return quatIdentity();
+  const double scale = std::sin(half_angle) / half_angle;
+  return quatUnit(glm::dquat(std::cos(half_angle), log_vector.x * scale, log_vector.y * scale, log_vector.z * scale));
+}
+
 }  // namespace proc

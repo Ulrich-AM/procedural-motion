@@ -308,13 +308,13 @@ These are part of Phase 2, not defects to hide:
 
 ## Non-goals
 
-This tree does not implement MuJoCo, Box2D, rigid-body physics, balance or stepping controllers, SIMBICON, procedural walking, foot IK, foot locking, terrain reconstruction, a motion-matching database, active ragdoll, AMASS, SMPL, video pose detection, MediaPipe, machine learning, mesh skinning, a Y-Bot mesh, or auto-rigging.
+This tree does not implement MuJoCo, Box2D, rigid-body physics, balance or stepping controllers, SIMBICON, foot IK, foot locking, terrain adaptation, a motion-matching database, active ragdoll, falls, hit reactions, neural networks, AMASS, SMPL, video pose detection, MediaPipe, mesh skinning, a Y-Bot mesh, or auto-rigging.
 
-Phase 3 observes gait. It does not generate a walk or a run.
+Phase 3 observes gait. Phase 4 generates a straight walk, run, or sprint from a locomotion model. It does not pin the feet.
 
 ## Roadmap
 
-Phase 1–3 foundation is architecturally frozen. See `ARCHITECTURE.md`. Phase 4 is not started. A generator may use PROC BODY, a reference model taken from PROC ANALYSIS, and speed, direction, and phase. It does not include SourceClip, the BVH or FBX importers, Assimp, the dataset index, LAFAN filenames, the analysis panel, or the batch analyzer.
+Phase 1–3 foundation is architecturally frozen. See `ARCHITECTURE.md`. Phase 4 adds `PROC_LOCOMOTION_MODEL` and a runtime generator. The generator uses a PROC BODY, the locomotion model, desired speed, and desired heading. It does not include SourceClip, the BVH or FBX importers, Assimp, the dataset index, LAFAN filenames, the analysis panel, or the batch analyzer.
 
 ## Phase 3 — motion analysis and gait extraction
 
@@ -328,7 +328,7 @@ Source geometry is measured on the `SourceClip`: foot and toe position, the virt
 
 Joint rotation is measured on the retargeted PROC pose: pelvis, spine, hips, knees, ankles, shoulders, and elbows. Rotations are stored as a normalized quaternion plus a hemisphere-continuous log vector. If `dot(previous, current)` is negative, `current` is negated before the log. Scalar plots use the local X component of that log as sagittal flexion. Pelvis roll is the local Y component. Raw quaternion components are not averaged.
 
-Source leg length is the mean of the available sides of rest `(hip → knee) + (knee → ankle)` on the source skeleton. Normalized stride, step, clearance, and pelvis height divide by that length. Normalized speed is the Froude number `speed / sqrt(9.80665 * source_leg_length)`. Metric and normalized values use different fields.
+Source leg length is the mean of the available sides of rest `(hip → knee) + (knee → ankle)` on the source skeleton. Normalized stride, step, clearance, and pelvis height divide by that length. `PROC_ANALYSIS` v1 stores `speed / sqrt(9.80665 * source_leg_length)` in the field `froude_number`. That quantity is a dimensionless speed, not the squared Froude number. Phase 4 recomputes it and names it `dimensionless_speed`. The v1 field name stays.
 
 ### Signals, ground, contacts
 
@@ -385,3 +385,59 @@ The lab's ANALYSIS section runs the same core on the loaded source clip, plots t
 - Smoothing can move a contact edge by about one or two samples. On the synthetic walk that offset is 40 ms.
 - Filename theme does not override the contact evidence.
 - Phase 3 does not generate locomotion, lock the feet, or build a controller.
+
+## Phase 4 — reference-driven procedural locomotion
+
+Phase 4 asks whether phase-normalized rotations measured from real gait can drive a new walk without replaying one clip. The public fixture is synthetic. A model built from local LAFAN or Mixamo stays local.
+
+### PROC_LOCOMOTION_MODEL
+
+Extension `.procloco.json`. Format `PROC_LOCOMOTION_MODEL`, version 1, skeleton `proc_humanoid_v0`.
+
+The speed coordinate is `dimensionless_speed = speed_mps / sqrt(g * leg_length)` with `g = 9.80665`. Each of walk, run, and sprint holds speed knots. A knot is the robust aggregate of accepted cycles in one dimensionless-speed bin: median log-vector curves, cadence, normalized stride, stance and flight fractions, pelvis vertical offset, contact probability, sample count, and spread. Sparse bins merge into a neighbor or stay marked low-confidence.
+
+Curves are full 3D quaternion logs for the pelvis residual, both spine joints, and both hips, knees, ankles, shoulders, and elbows. Quaternion components are not averaged. The runtime stores 100 samples on `[0, 1)` and interpolates across the wrap. The builder reports the largest seam between phase 0 and the dropped phase-1 sample.
+
+### Offline builder
+
+`proc_motion_model.exe` reads one `.procanalysis.json` or a directory of them.
+
+```text
+proc_motion_model.exe --input analysis_output\lafan1\clips --output local_models\human_locomotion.procloco.json
+```
+
+Optional filters: `--min-quality`, `--regime`, `--subject`, `--bin-width`. It keeps accepted, straight, non-mirrored cycles, then canonicalizes them. Phase 0 is left initial contact. A right cycle is reflected across the sagittal plane (`+X` right, `+Y` forward, `+Z` up) and the left/right channels are swapped. Mirroring twice recovers the pose. The builder does not understand the runtime, and the runtime loader does not understand `PROC_ANALYSIS`.
+
+### Runtime
+
+`proc_runtime` is the body, the motion core, FK, the locomotion model, and the generator. `proc_core` links that library and adds import, Assimp, retarget, analysis, the dataset tools, and the model builder. `proc_runtime_link` is a small executable that links only `proc_runtime`.
+
+Desired metric speed is rate-limited into an actual speed, converted to dimensionless speed with the target PROC leg length, and used to interpolate knots. Outside a regime's support the sample clamps or the regime transitions, and the diagnostic says which. Target leg length is the mean of the locked `(hip → knee) + (knee → ankle)` lengths. It is not measured from an animated pose.
+
+Cadence, in steps per minute, is the timing relationship. Phase advances by `dt * cadence_spm / 120` and wraps on `[0, 1)`. Root horizontal motion is `heading_forward * actual_speed * dt`. At 120 steps/min the same-side phase advances one cycle per second. At 1.25 m/s a straight 8 s bake travels 10 m, independent of cadence.
+
+Pelvis height in the model is `(pelvis_z - cycle mean) / source_leg_length`. The generator multiplies that curve by the target leg length and adds it to the body's own rest height. Root orientation is `desired_heading * residual_gait_rotation`. The source clip's world heading is not baked in.
+
+Unmodeled joints stay at identity. The pose has no scale, no bone-length change, and no non-root translation. Idle fades the gait toward the bind pose and stops the phase as speed falls. There is no idle clip.
+
+AUTO selects a regime from the model's support, with hysteresis. FORCE WALK, FORCE RUN, and FORCE SPRINT are debug overrides. A walk/run blend keeps the current phase and crossfades the curves. Heading yaws the straight gait. It does not create a turning step, a bank, or an inside/outside stride.
+
+### Lab, bake, and diagnostics
+
+The lab has PLAYBACK and GENERATOR. Generator controls are the model file, desired speed, acceleration, heading, regime, play, and phase reset. The inspector lists regimes, supports, knots, cycle counts, and phase curves for the hip, knee, ankle, pelvis vertical, cadence, and contact probability.
+
+Bake writes an ordinary `.procmo`: root translation, root rotation, local rotations, and optional generated contacts. `source.type` is `procedural`. Those contacts are model probabilities, not Phase 3 observations.
+
+During predicted contact the lab reports mean and peak horizontal foot slip. It does not run foot IK or move the pelvis to hide that slip.
+
+`assets/models/synthetic_locomotion.procloco.json` is built from repository-owned synthetic cycles. Third-party-derived models belong in `local_models/` and are not committed.
+
+### Known limitations
+
+- The gait is straight. Heading only rotates the whole cycle.
+- Feet are not locked. Slip is a measurement.
+- There is no terrain, balance, physics, ragdoll, or motion matching.
+- Neck and finger joints stay at identity.
+- A synthetic fixture shows that the pipeline is coherent. It is not evidence of visual realism.
+- `PROC_ANALYSIS` v1 still calls dimensionless speed `froude_number`.
+- Optional toe mappings (`LeftToeBase`, `RightToeBase`, `LeftToe`, `RightToe` → `ltoesj` / `rtoesj`) do not make a profile fail when the source has no toe. A missing toe still falls back to the foot, with the existing provenance warning.

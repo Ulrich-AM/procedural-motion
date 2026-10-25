@@ -129,11 +129,19 @@ int main(int argc, char** argv) {
   const int relationship = runRelationshipTests();
   const int dataset_index = runDatasetIndexTests();
   const int architecture = runArchitectureTests();
-  const int failed = body + fk + motion + bvh + retarget + import + analysis_signal + contact + gait_event + gait_cycle + relationship + dataset_index + architecture;
+  const int locomotion = runLocomotionTests();
+  const int failed = body + fk + motion + bvh + retarget + import + analysis_signal + contact + gait_event + gait_cycle + relationship + dataset_index + architecture + locomotion;
   if (failed != 0) {
     std::cerr << failed << " test(s) failed\n";
     return 1;
   }
+  std::cout << "architecture tests ok\n";
+  std::cout << "body tests ok\n";
+  std::cout << "fk tests ok\n";
+  std::cout << "motion tests ok\n";
+  std::cout << "retarget tests ok\n";
+  std::cout << "analysis tests ok\n";
+  std::cout << "locomotion tests ok\n";
   std::cout << "all tests passed\n";
   return 0;
 }
