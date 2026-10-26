@@ -328,6 +328,20 @@ Optional filters are `--themes walk,run,sprint`, `--min-quality`, `--min-cycles-
 
 The tool does not download data. If the dataset path is missing it prints `REAL DATA VALIDATION: NOT RUN` and writes that status into `VALIDATION.md`. Playback can hide horizontal travel with `IN-PLACE ANALYSIS` without changing the motion the analyzer measures. Generator mode can load a second model, swap it with the primary model without moving the camera, and print hip, knee, and ankle differences at the same dimensionless speed. Foot slip is still only reported.
 
+### Phase 4.4 reference capture
+
+Reference Capture turns one or more user-selected animations into a `PROC_LOCOMOTION_MODEL`. It is an authoring workflow. It is not the Phase 4.3 multi-subject validation, and one clip is one reference rather than a complete gait dataset.
+
+In the lab, choose REFERENCE. Load an FBX or BVH, confirm SOURCE / TARGET / OVERLAY, then Analyze for Reference. Mark accepted cycles, choose WALK, RUN, or SPRINT, and add them to the reference set. Build Reference Model previews the procedural result at the same normalized phase as the selected cycle. IN-PLACE ANALYSIS and IN-PLACE PREVIEW remove horizontal travel from the display only.
+
+A clip with real root travel uses the measured speed. A clip whose root speed is near zero is reported as in-place and is not built until a manual reference speed is set. That speed is authoring provenance. It does not rewrite the analysis file and it is not scientific evidence. One speed knot clamps the pose curves outside that speed. Root travel still follows the requested speed. Several clips at different speeds become several knots and may interpolate. The synthetic model remains the public demo. Mixamo-derived models stay local, normally under `local_models/`, with a `.reference.json` sidecar. They are not written into `assets/models/`.
+
+```text
+proc_motion_reference.exe --input Walk.fbx --profile mixamo --body assets\bodies\neutral.procbody.json --regime walk --output local_models\walk.procloco.json
+```
+
+Add `--speed 1.25` for an in-place source. Repeat `--input` for another clip. `--regime`, `--speed`, and `--cycles` apply to the preceding input. If `--cycles` is omitted, accepted straight cycles are used. If the source is in-place and `--speed` is omitted, the tool stops. Foot IK is not applied.
+
 ## Phase 3 — motion analysis and gait extraction
 
 Phase 3 watches imported locomotion. It detects contacts, splits same-side strides, normalizes them by phase, and stores measurements and simple speed relationships. It does not synthesize a pose.

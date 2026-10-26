@@ -30,7 +30,13 @@ bool supportContains(const RegimeModel& regime, double speed, double margin) {
 KnotLerp sampleKnots(const RegimeModel& regime, double speed) {
   KnotLerp sample;
   if (regime.knots.empty()) return sample;
-  if (speed <= regime.knots.front().dimensionless_speed || regime.knots.size() == 1) {
+  if (regime.knots.size() == 1) {
+    sample.a = sample.b = &regime.knots.front();
+    sample.index_a = sample.index_b = 0;
+    sample.clamped = std::abs(speed - regime.knots.front().dimensionless_speed) > 1e-6;
+    return sample;
+  }
+  if (speed <= regime.knots.front().dimensionless_speed) {
     sample.a = sample.b = &regime.knots.front();
     sample.index_a = sample.index_b = 0;
     sample.clamped = speed < regime.knots.front().dimensionless_speed - 1e-9;

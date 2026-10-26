@@ -131,7 +131,8 @@ int main(int argc, char** argv) {
   const int architecture = runArchitectureTests();
   const int locomotion = runLocomotionTests();
   const int gait_validation = runGaitValidationTests();
-  const int failed = body + fk + motion + bvh + retarget + import + analysis_signal + contact + gait_event + gait_cycle + relationship + dataset_index + architecture + locomotion + gait_validation;
+  const int reference_capture = runReferenceCaptureTests();
+  const int failed = body + fk + motion + bvh + retarget + import + analysis_signal + contact + gait_event + gait_cycle + relationship + dataset_index + architecture + locomotion + gait_validation + reference_capture;
   if (failed != 0) {
     std::cerr << failed << " test(s) failed\n";
     return 1;

@@ -107,6 +107,7 @@ add_library(proc_core STATIC
   src/analysis/analysis_io.cpp
   src/analysis/locomotion_model_builder.cpp
   src/analysis/gait_validation.cpp
+  src/analysis/reference_capture.cpp
   src/analysis/synthetic_locomotion.cpp
   src/dataset/lafan1_index.cpp
   src/dataset/dataset_index.cpp
@@ -135,6 +136,7 @@ add_executable(proc_motion_lab
   src/app/import_panel.cpp
   src/app/analysis_panel.cpp
   src/app/generator_panel.cpp
+  src/app/reference_panel.cpp
   src/render/renderer.cpp
   src/render/skeleton_renderer.cpp)
 
@@ -166,6 +168,13 @@ add_executable(proc_motion_analyze
   src/cli/proc_motion_analyze.cpp)
 add_executable(proc_motion_validate_gait
   src/cli/proc_motion_validate_gait.cpp)
+add_executable(proc_motion_reference
+  src/cli/proc_motion_reference.cpp)
+target_link_libraries(proc_motion_reference PRIVATE proc_core)
+if(MSVC)
+  target_compile_options(proc_motion_reference PRIVATE /W4 /permissive-)
+  target_compile_definitions(proc_motion_reference PRIVATE NOMINMAX)
+endif()
 target_link_libraries(proc_motion_validate_gait PRIVATE proc_core)
 if(MSVC)
   target_compile_options(proc_motion_validate_gait PRIVATE /W4 /permissive-)
@@ -200,7 +209,8 @@ add_executable(proc_motion_tests
   tests/dataset_index_tests.cpp
   tests/architecture_tests.cpp
   tests/locomotion_tests.cpp
-  tests/gait_validation_tests.cpp)
+  tests/gait_validation_tests.cpp
+  tests/reference_capture_tests.cpp)
 target_link_libraries(proc_motion_tests PRIVATE proc_core)
 target_compile_definitions(proc_motion_tests PRIVATE PROCMOTION_SOURCE_DIR="${PROCMOTION_SOURCE_DIR_FWD}")
 if(MSVC)

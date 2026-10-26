@@ -10,6 +10,9 @@
 #include "app/generator_panel.h"
 #include "app/generator_preview.h"
 #include "app/import_panel.h"
+#include "app/reference_panel.h"
+#include "analysis/reference_capture.h"
+#include "motion/interpolation.h"
 #include "locomotion/locomotion_generator.h"
 #include "retarget/retargeter.h"
 #include "validation/bone_length_monitor.h"
@@ -112,6 +115,18 @@ void applyTheme(float scale) {
 
 }  // namespace
 
+enum class LabMode { Playback, Generator, Reference };
+
+const GaitCycle* referenceCycle(const ProcAnalysis& analysis, int ordinal) {
+  int seen = 0;
+  for (const GaitCycle& cycle : analysis.cycles) {
+    if (cycle.mirrored) continue;
+    if (seen == ordinal) return &cycle;
+    ++seen;
+  }
+  return nullptr;
+}
+
 struct LabState {
   GLFWwindow* window = nullptr;
   Renderer renderer;
@@ -151,6 +166,8 @@ struct LabState {
   ImportSession import;
   AnalysisUi analysis_ui;
   GeneratorUi generator;
+  ReferenceUi reference;
+  LabMode mode = LabMode::Playback;
   glm::mat4 view{1.0f};
   glm::mat4 projection{1.0f};
 };
@@ -262,7 +279,32 @@ void updatePose(LabState& lab, double dt) {
   lab.pose_ready = false;
   if (!lab.has_body) return;
   Pose pose;
-  if (lab.generator.enabled && lab.generator.has_model) {
+  if (lab.mode == LabMode::Reference && lab.analysis_ui.valid && lab.has_motion) {
+    if (lab.reference.playing) lab.reference.phase = static_cast<float>(wrapPhase(lab.reference.phase + dt * 1.5));
+    const GaitCycle* cycle = referenceCycle(lab.analysis_ui.analysis, lab.reference.review_cycle);
+    if (cycle != nullptr) lab.player.seekSeconds(referencePhaseTime(*cycle, lab.reference.phase));
+  }
+  if (lab.mode == LabMode::Reference && lab.reference.has_model && lab.reference.view != ReferenceView::Source) {
+    LocomotionCommand command;
+    command.desired_speed_mps = lab.reference.preview_speed;
+    command.max_accel_mps2 = 4.0;
+    command.force = lab.reference.regime == "run" ? RegimeForce::Run : lab.reference.regime == "sprint" ? RegimeForce::Sprint : RegimeForce::Walk;
+    LocomotionState state;
+    state.phase = lab.reference.phase;
+    state.desired_speed_mps = command.desired_speed_mps;
+    state.actual_speed_mps = command.desired_speed_mps;
+    advanceLocomotion(state, lab.reference.model, lab.body, command, 0.0);
+    state.phase = lab.reference.phase;
+    const GeneratedPoseResult generated = generateConstrainedLocomotionPose(lab.body, lab.reference.model, state, lab.limit_mode);
+    lab.limits = generated.limits;
+    const WorldPose traveling = forwardKinematics(lab.body, generated.limits.pose);
+    lab.bones = measureBoneLengths(lab.body, traveling, kRuntimeBoneToleranceM);
+    const Pose shown = lab.reference.in_place ? poseForInPlacePreview(generated.limits.pose) : generated.limits.pose;
+    lab.world = forwardKinematics(lab.body, shown);
+    lab.pose_ready = true;
+    return;
+  }
+  if (lab.mode == LabMode::Generator && lab.generator.has_model) {
     LocomotionCommand command;
     command.desired_speed_mps = lab.generator.desired_speed;
     command.heading = glm::radians(static_cast<double>(lab.generator.heading_deg));
@@ -290,8 +332,9 @@ void updatePose(LabState& lab, double dt) {
   if (lab.has_motion && lab.motion.skeleton == lab.body.skeleton) pose = lab.player.sample();
   lab.limits = applyJointLimits(lab.body, pose, lab.limit_mode);
   const WorldPose raw_world = forwardKinematics(lab.body, lab.limits.pose);
-  const Pose shown = lab.playback_in_place ? poseForInPlacePreview(lab.limits.pose) : lab.limits.pose;
-  lab.world = lab.playback_in_place ? forwardKinematics(lab.body, shown) : raw_world;
+  const bool in_place = lab.mode == LabMode::Reference ? lab.reference.in_place : lab.playback_in_place;
+  const Pose shown = in_place ? poseForInPlacePreview(lab.limits.pose) : lab.limits.pose;
+  lab.world = in_place ? forwardKinematics(lab.body, shown) : raw_world;
   lab.bones = measureBoneLengths(lab.body, raw_world, kRuntimeBoneToleranceM);
   lab.pose_ready = true;
   if (lab.import.has_source) {
@@ -348,15 +391,30 @@ void drawSidePanel(LabState& lab) {
   }
 
   section("MODE");
-  if (ImGui::RadioButton("PLAYBACK", !lab.generator.enabled)) lab.generator.enabled = false;
+  if (ImGui::RadioButton("PLAYBACK", lab.mode == LabMode::Playback)) lab.mode = LabMode::Playback;
   ImGui::SameLine();
-  if (ImGui::RadioButton("GENERATOR", lab.generator.enabled)) lab.generator.enabled = true;
-  if (lab.generator.enabled) {
+  if (ImGui::RadioButton("GENERATOR", lab.mode == LabMode::Generator)) lab.mode = LabMode::Generator;
+  if (ImGui::RadioButton("REFERENCE", lab.mode == LabMode::Reference)) lab.mode = LabMode::Reference;
+  if (lab.mode == LabMode::Generator) {
     section("GENERATOR");
     drawGeneratorPanel(lab.generator, lab.window, lab.has_body ? &lab.body : nullptr, lab.has_body, lab.asset_root, lab.body_path,
                        &lab.limit_mode, &lab.limits);
   }
-  if (!lab.generator.enabled) {
+  if (lab.mode == LabMode::Reference) {
+    section("REFERENCE CAPTURE");
+    const ImportResult imported = drawImportPanel(lab.import, lab.window, lab.has_body ? &lab.body : nullptr, lab.has_body, lab.asset_root,
+                                                  lab.motion, lab.has_motion, lab.motion_path, lab.motion_status, lab.player);
+    if (imported.replaced_motion) {
+      rebuildTrajectory(lab);
+      lab.analysis_ui.valid = false;
+      lab.reference.analysis_cycle_count = -1;
+    }
+    drawReferencePanel(lab.reference, lab.analysis_ui, lab.import, lab.has_motion ? &lab.motion : nullptr, lab.has_motion, lab.window,
+                       lab.has_body ? &lab.body : nullptr, lab.has_body, lab.asset_root);
+    drawAnalysisSection(lab.analysis_ui, lab.import.has_source ? &lab.import.clip : nullptr, lab.has_motion ? &lab.motion : nullptr,
+                        lab.import.mapping, lab.player, lab.asset_root);
+  }
+  if (lab.mode == LabMode::Playback) {
   section("MOTION");
   ImGui::TextWrapped("%s", lab.motion_path.empty() ? "no file" : lab.motion_path.filename().string().c_str());
   if (ImGui::Button("Load motion")) {
@@ -443,7 +501,17 @@ void drawSidePanel(LabState& lab) {
 }
 
 void drawTransport(LabState& lab) {
-  if (lab.generator.enabled) {
+  if (lab.mode == LabMode::Reference) {
+    if (ImGui::Button(lab.reference.playing ? "PAUSE" : "PLAY")) lab.reference.playing = !lab.reference.playing;
+    ImGui::SameLine();
+    if (ImGui::Button("Reset phase")) {
+      lab.reference.phase = 0.0f;
+      lab.reference.playing = false;
+    }
+    ImGui::Text("phase %.3f   reference", lab.reference.phase);
+    return;
+  }
+  if (lab.mode == LabMode::Generator) {
     if (ImGui::Button(lab.generator.playing ? "PAUSE" : "PLAY")) lab.generator.playing = !lab.generator.playing;
     ImGui::SameLine();
     if (ImGui::Button("Reset phase")) {
@@ -570,7 +638,7 @@ int Application::run() {
     }
     if (extension == ".procmo") loadMotion(*state, path);
     else if (path.filename().string().find("procloco") != std::string::npos) {
-      state->generator.enabled = true;
+      state->mode = LabMode::Generator;
       loadLocomotionModel(state->generator, path);
     } else if (extension == ".bvh" || extension == ".fbx") {
       loadDroppedSource(state->import, path, state->asset_root, state->has_body ? &state->body : nullptr, state->has_body,
@@ -589,7 +657,7 @@ int Application::run() {
       if (character >= 'A' && character <= 'Z') character = static_cast<char>(character - 'A' + 'a');
     }
     if (path.filename().string().find("procloco") != std::string::npos) {
-      lab.generator.enabled = true;
+      lab.mode = LabMode::Generator;
       loadLocomotionModel(lab.generator, path);
     } else if (extension == ".fbx" || extension == ".bvh") {
       loadDroppedSource(lab.import, path, lab.asset_root, lab.has_body ? &lab.body : nullptr, lab.has_body, lab.motion,
@@ -658,7 +726,7 @@ int Application::run() {
     drawGroundGrid(lab.renderer);
     const bool show_target = lab.pose_ready && (!lab.import.has_source || lab.import.view != ViewportMode::Source);
     const bool show_source = lab.import.has_source && lab.import.view != ViewportMode::Target;
-    if (show_target && lab.generator.enabled && lab.generator.has_model && lab.generator.show_ghosts) {
+    if (show_target && lab.mode == LabMode::Generator && lab.generator.has_model && lab.generator.show_ghosts) {
       const double marks[] = {0.0, 0.25, 0.50, 0.75};
       for (double mark : marks) {
         const LocomotionState sample = ghostSampleState(lab.generator.state, mark);
@@ -670,6 +738,32 @@ int Application::run() {
         ghost_options.shade = 0.38f;
         drawSkeleton(lab.renderer, lab.body, forwardKinematics(lab.body, shown), ghost_options);
       }
+    }
+    if (show_target && lab.mode == LabMode::Reference && lab.reference.show_ghosts && lab.reference.has_model &&
+        lab.reference.view != ReferenceView::Source) {
+      const double marks[] = {0.0, 0.25, 0.50, 0.75};
+      for (double mark : marks) {
+        LocomotionState sample;
+        sample.phase = mark;
+        LocomotionCommand ghost_command;
+        ghost_command.desired_speed_mps = lab.reference.preview_speed;
+        ghost_command.force = lab.reference.regime == "run" ? RegimeForce::Run : lab.reference.regime == "sprint" ? RegimeForce::Sprint : RegimeForce::Walk;
+        advanceLocomotion(sample, lab.reference.model, lab.body, ghost_command, 0.0);
+        sample.phase = mark;
+        const GeneratedPoseResult ghost = generateConstrainedLocomotionPose(lab.body, lab.reference.model, sample, lab.limit_mode);
+        SkeletonDrawOptions ghost_options;
+        ghost_options.draw_facing_marker = false;
+        ghost_options.shade = 0.38f;
+        drawSkeleton(lab.renderer, lab.body, forwardKinematics(lab.body, poseForInPlacePreview(ghost.limits.pose)), ghost_options);
+      }
+    }
+    if (show_target && lab.mode == LabMode::Reference && lab.reference.view == ReferenceView::Overlay && lab.has_motion) {
+      Pose source_pose = sampleMotion(lab.motion, lab.player.time(), false);
+      if (lab.reference.in_place) source_pose = poseForInPlacePreview(source_pose);
+      SkeletonDrawOptions source_options;
+      source_options.shade = 0.55f;
+      source_options.draw_facing_marker = false;
+      drawSkeleton(lab.renderer, lab.body, forwardKinematics(lab.body, source_pose), source_options);
     }
     if (show_target) {
       SkeletonDrawOptions options;
@@ -692,7 +786,8 @@ int Application::run() {
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
     if (ImGui::IsKeyPressed(ImGuiKey_Space) && !io.WantCaptureKeyboard) {
-      if (lab.generator.enabled) lab.generator.playing = !lab.generator.playing;
+      if (lab.mode == LabMode::Generator) lab.generator.playing = !lab.generator.playing;
+      else if (lab.mode == LabMode::Reference) lab.reference.playing = !lab.reference.playing;
       else lab.player.togglePlay();
     }
     double mouse_x = 0.0;

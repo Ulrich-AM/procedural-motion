@@ -29,3 +29,4 @@ int runDatasetIndexTests();
 int runArchitectureTests();
 int runLocomotionTests();
 int runGaitValidationTests();
+int runReferenceCaptureTests();

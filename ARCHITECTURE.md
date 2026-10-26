@@ -117,4 +117,6 @@ In-place preview, phase scrubbing, and quarter-cycle ghosts live in the lab. The
 
 `proc_motion_validate_gait` is an offline experiment. It may read a local dataset and write `analysis_output/`. It does not link into `proc_runtime`, and it does not install a third-party model into `assets/models/`. A knot built from fewer than three real cycles is low-confidence. The synthetic model remains the deterministic public fixture.
 
+Reference Capture is a separate authoring path in `proc_core` and the lab. It selects analyzed cycles, may label their regime, and may supply a manual speed for an in-place source. Those overrides are not written into `ProcAnalysis`. The same canonicalization, mirroring, phase sampling, and median aggregation build the model. `proc_runtime` does not include the reference set, the `.procref.json` session, or the provenance sidecar. A one-clip model is a single-speed reference. It does not claim a general gait dataset.
+
 The GUI import panel and the batch analyzer still each load and retarget a clip. They share the mapping and `SourceSemanticMap`. A single `processSourceMotion` helper is not worth a rewrite of the import UI. The lab separates PLAYBACK from GENERATOR so those controls stay apart.
