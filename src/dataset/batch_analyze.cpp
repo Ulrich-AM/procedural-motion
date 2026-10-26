@@ -24,10 +24,26 @@ std::string lowerCopy(std::string text) {
   return text;
 }
 
-bool themeMatches(const IndexedClip& clip, const std::string& theme) {
+bool oneTheme(const IndexedClip& clip, const std::string& theme) {
   if (theme.empty()) return true;
   const std::string needle = lowerCopy(theme);
   return lowerCopy(clip.theme).find(needle) != std::string::npos || lowerCopy(clip.filename).find(needle) != std::string::npos;
+}
+
+bool themeMatches(const IndexedClip& clip, const std::string& theme) {
+  if (theme.empty()) return true;
+  std::string rest = theme;
+  while (!rest.empty()) {
+    const std::size_t comma = rest.find(',');
+    const std::string part = rest.substr(0, comma);
+    std::string trimmed = part;
+    while (!trimmed.empty() && trimmed.front() == ' ') trimmed.erase(trimmed.begin());
+    while (!trimmed.empty() && trimmed.back() == ' ') trimmed.pop_back();
+    if (oneTheme(clip, trimmed)) return true;
+    if (comma == std::string::npos) break;
+    rest = rest.substr(comma + 1);
+  }
+  return false;
 }
 
 }  // namespace
@@ -35,6 +51,7 @@ bool themeMatches(const IndexedClip& clip, const std::string& theme) {
 BatchReport analyzeBatch(const BatchRequest& request) {
   BatchReport report;
   DatasetIndex index = scanDataset(request.input, request.dataset, request.profile_directory, request.profile);
+  report.indexed = static_cast<int>(index.clips.size());
   std::vector<RetargetProfile> profiles;
   loadRetargetProfiles(request.profile_directory, profiles);
   const RetargetProfile* selected = nullptr;
@@ -60,6 +77,19 @@ BatchReport analyzeBatch(const BatchRequest& request) {
     if (!themeMatches(clip, request.theme) || clip.format == "procmo") continue;
     ++ordinal;
     ++report.processed;
+    const std::string stem = std::filesystem::path(clip.filename).stem().string();
+    if (std::find(request.preserve_stems.begin(), request.preserve_stems.end(), stem) != request.preserve_stems.end()) {
+      ProcAnalysis preserved;
+      const std::filesystem::path clip_path = request.output / "clips" / (stem + ".procanalysis.json");
+      if (readAnalysisFromFile(clip_path, preserved).ok()) {
+        ++report.analyzed;
+        clip.analysis_status = "preserved";
+        clip.import_status = "preserved";
+        analyses.push_back(std::move(preserved));
+        report.warnings.push_back(clip.filename + ": kept a manually reviewed analysis");
+        continue;
+      }
+    }
     std::cout << "[" << ordinal << "/" << total << "] " << clip.filename << '\n';
     if (clip.import_status == "failed") {
       ++report.failed;

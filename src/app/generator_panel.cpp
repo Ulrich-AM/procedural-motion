@@ -1,5 +1,6 @@
 #include "app/generator_panel.h"
 #include "app/generator_preview.h"
+#include "analysis/gait_validation.h"
 
 #include "locomotion/body_scale.h"
 #include "locomotion/locomotion_model_io.h"
@@ -161,6 +162,26 @@ void loadLocomotionModel(GeneratorUi& ui, const std::filesystem::path& path) {
   ui.left_mean_mps = ui.left_peak_mps = ui.right_mean_mps = ui.right_peak_mps = 0.0;
 }
 
+void loadComparisonModel(GeneratorUi& ui, const std::filesystem::path& path) {
+  ProcLocomotionModel model;
+  Status status = readLocomotionModelFromFile(path, model);
+  ui.status = status;
+  if (!status.ok()) {
+    ui.has_compare = false;
+    return;
+  }
+  ui.compare = std::move(model);
+  ui.compare_path = path;
+  ui.has_compare = true;
+}
+
+void swapLocomotionModels(GeneratorUi& ui) {
+  if (!ui.has_compare || !ui.has_model) return;
+  std::swap(ui.model, ui.compare);
+  std::swap(ui.path, ui.compare_path);
+  ui.audit_valid = false;
+}
+
 void accumulateGeneratorSlip(GeneratorUi& ui, const WorldPose& world, const Pose& pose, double dt) {
   const glm::dvec3 left = world.joints[jointIndex(JointId::LeftFoot)].position;
   const glm::dvec3 right = world.joints[jointIndex(JointId::RightFoot)].position;
@@ -216,6 +237,16 @@ void drawGeneratorPanel(GeneratorUi& ui, GLFWwindow* window, const ProcBody* bod
   ImGui::Checkbox("IN-PLACE PREVIEW", &ui.in_place);
   ImGui::SameLine();
   ImGui::Checkbox("GHOST POSES", &ui.show_ghosts);
+  if (ImGui::Button("Load comparison")) {
+    const std::filesystem::path path = openModelDialog(window, asset_root / "assets" / "models");
+    if (!path.empty()) loadComparisonModel(ui, path);
+  }
+  if (ui.has_compare) {
+    ImGui::SameLine();
+    if (ImGui::Button("Swap models")) swapLocomotionModels(ui);
+    ImGui::TextWrapped("PRIMARY %s", ui.path.filename().string().c_str());
+    ImGui::TextWrapped("COMPARE %s", ui.compare_path.filename().string().c_str());
+  }
   if (!ui.playing) {
     float phase = static_cast<float>(ui.state.phase);
     if (ImGui::SliderFloat("PHASE", &phase, 0.0f, 1.0f, "%.3f")) ui.state.phase = wrapPhase(phase >= 0.999f ? 0.0 : phase);
@@ -323,6 +354,19 @@ void drawGeneratorPanel(GeneratorUi& ui, GLFWwindow* window, const ProcBody* bod
     if (sprint_knot != nullptr) series.push_back(channelOf(*sprint_knot, channel));
     plotSeries(label, series, {IM_COL32(230, 230, 230, 255), IM_COL32(170, 170, 170, 255), IM_COL32(110, 110, 110, 255)});
   };
+  if (ui.has_compare) {
+    const char* regime = regimeName(ui.state.regime);
+    const std::string regime_key = regime == std::string("walk") || regime == std::string("run") || regime == std::string("sprint") ? regime : "walk";
+    const CurveDifference matched = compareModelsAtSpeed(ui.model, ui.compare, regime_key, ui.state.dimensionless_speed);
+    if (matched.available) {
+      ImGui::Text("matched dim %.3f  hip rms %.3f  knee rms %.3f  ankle rms %.3f", matched.dimensionless_speed, matched.hip_rms,
+                  matched.knee_rms, matched.ankle_rms);
+      ImGui::Text("cadence delta %.1f  stance delta %.3f  flight delta %.3f", matched.cadence_difference, matched.stance_difference,
+                  matched.flight_difference);
+    } else {
+      ImGui::TextUnformatted("comparison has no shared regime at this speed");
+    }
+  }
   ImGui::TextUnformatted("COMPARE  walk solid   run broken   sprint dotted");
   compare("hip log x  walk / run / sprint", LocoChannel::LeftHip);
   compare("knee log x  walk / run / sprint", LocoChannel::LeftKnee);

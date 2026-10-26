@@ -127,6 +127,7 @@ struct LabState {
   std::filesystem::path body_path;
   std::filesystem::path motion_path;
   bool show_trajectory = false;
+  bool playback_in_place = false;
   bool show_joint_labels = false;
   bool show_bone_labels = false;
   double yaw = 0.85;
@@ -288,12 +289,14 @@ void updatePose(LabState& lab, double dt) {
   }
   if (lab.has_motion && lab.motion.skeleton == lab.body.skeleton) pose = lab.player.sample();
   lab.limits = applyJointLimits(lab.body, pose, lab.limit_mode);
-  lab.world = forwardKinematics(lab.body, lab.limits.pose);
-  lab.bones = measureBoneLengths(lab.body, lab.world, kRuntimeBoneToleranceM);
+  const WorldPose raw_world = forwardKinematics(lab.body, lab.limits.pose);
+  const Pose shown = lab.playback_in_place ? poseForInPlacePreview(lab.limits.pose) : lab.limits.pose;
+  lab.world = lab.playback_in_place ? forwardKinematics(lab.body, shown) : raw_world;
+  lab.bones = measureBoneLengths(lab.body, raw_world, kRuntimeBoneToleranceM);
   lab.pose_ready = true;
   if (lab.import.has_source) {
     lab.import.report.direction_max_error_deg =
-        segmentDirectionError(lab.import.clip, lab.player.time(), lab.body, lab.world, lab.import.mapping,
+        segmentDirectionError(lab.import.clip, lab.player.time(), lab.body, raw_world, lab.import.mapping,
                               lab.import.report.direction_worst_bone);
   }
 }
@@ -433,6 +436,7 @@ void drawSidePanel(LabState& lab) {
 
   section("VIEW");
   if (ImGui::Checkbox("root trajectory", &lab.show_trajectory)) rebuildTrajectory(lab);
+  ImGui::Checkbox("IN-PLACE ANALYSIS", &lab.playback_in_place);
   ImGui::Checkbox("joint labels", &lab.show_joint_labels);
   ImGui::Checkbox("bone names", &lab.show_bone_labels);
   ImGui::TextWrapped("Head peg is a facing marker, not a bone. LMB orbits. Wheel zooms.");

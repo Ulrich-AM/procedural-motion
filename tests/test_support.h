@@ -28,3 +28,4 @@ int runRelationshipTests();
 int runDatasetIndexTests();
 int runArchitectureTests();
 int runLocomotionTests();
+int runGaitValidationTests();

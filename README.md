@@ -316,6 +316,18 @@ Phase 3 observes gait. Phase 4 generates a straight walk, run, or sprint from a 
 
 Phase 1–3 foundation is architecturally frozen. See `ARCHITECTURE.md`. Phase 4 adds `PROC_LOCOMOTION_MODEL` and a runtime generator. The generator uses a PROC BODY, the locomotion model, desired speed, and desired heading. It does not include SourceClip, the BVH or FBX importers, Assimp, the dataset index, LAFAN filenames, the analysis panel, or the batch analyzer.
 
+### Phase 4.3 real-gait experiment
+
+`proc_motion_validate_gait.exe` runs the offline study from a local dataset through import, retarget, analysis, a locomotion model, and a generated bake. The runtime still never sees the source clips.
+
+```text
+proc_motion_validate_gait.exe --dataset datasets\lafan1 --profile lafan1 --body assets\bodies\neutral.procbody.json --output analysis_output\real_gait
+```
+
+Optional filters are `--themes walk,run,sprint`, `--min-quality`, `--min-cycles-per-knot`, and `--max-cycles-per-subject`. The default knot is trusted only when it has at least 3 accepted cycles. Smaller knots stay in the model and are marked low-confidence. Accepted cycles are capped per subject inside each speed bin so one long clip does not own the median. The last subject, or the last clip when only one subject is present, is held out of the build. `analysis_output/`, `datasets/`, and `local_models/` stay untracked. A real-derived `.procloco` is not written under `assets/models/`. The synthetic model remains the public regression fixture.
+
+The tool does not download data. If the dataset path is missing it prints `REAL DATA VALIDATION: NOT RUN` and writes that status into `VALIDATION.md`. Playback can hide horizontal travel with `IN-PLACE ANALYSIS` without changing the motion the analyzer measures. Generator mode can load a second model, swap it with the primary model without moving the camera, and print hip, knee, and ankle differences at the same dimensionless speed. Foot slip is still only reported.
+
 ## Phase 3 — motion analysis and gait extraction
 
 Phase 3 watches imported locomotion. It detects contacts, splits same-side strides, normalizes them by phase, and stores measurements and simple speed relationships. It does not synthesize a pose.

@@ -19,6 +19,9 @@ struct GeneratorUi {
   ProcLocomotionModel model;
   bool has_model = false;
   std::filesystem::path path;
+  ProcLocomotionModel compare;
+  bool has_compare = false;
+  std::filesystem::path compare_path;
   Status status;
   LocomotionState state;
   bool playing = false;
